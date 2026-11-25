@@ -71,10 +71,16 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 			context.takeScreenshot("inventory_closed");
 
 			// Open Shop keybind: the registered key (default B) must open the shop chest menu.
-			boolean registered = context.computeOnClient(mc -> ShopkeeperClient.openShop != null
-				&& java.util.Arrays.asList(mc.options.keyMappings).contains(ShopkeeperClient.openShop));
+			boolean registered = context.computeOnClient(mc -> ShopkeeperClient.openShopKey() != null
+				&& java.util.Arrays.asList(mc.options.keyMappings).contains(ShopkeeperClient.openShopKey()));
 			if (!registered) {
 				throw new AssertionError("Open Shop key mapping is not registered in options");
+			}
+			if (FabricLoader.getInstance().isModLoaded("controlify")) {
+				if (!ControlifyCheck.openShopBindingRegistered()) {
+					throw new AssertionError("Controlify is loaded but shopkeeper:open_shop binding is missing");
+				}
+				System.out.println("[shopkeeper-test] PASS controlify open_shop binding registered");
 			}
 			context.getInput().pressKey(InputConstants.KEY_B);
 			context.waitForScreen(ContainerScreen.class);

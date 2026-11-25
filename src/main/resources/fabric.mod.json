@@ -20,6 +20,9 @@
 		"client": [
 			"dev.brian.shopkeeper.client.ShopkeeperClient"
 		],
+		"controlify": [
+			"dev.brian.shopkeeper.client.ShopkeeperControlify"
+		],
 		"fabric-client-gametest": [
 			"dev.brian.shopkeeper.client.ShopkeeperClientGameTest"
 		]
@@ -29,5 +32,8 @@
 		"minecraft": "~26.3",
 		"java": ">=25",
 		"fabric-api": "*"
+	},
+	"suggests": {
+		"controlify": "*"
 	}
 }

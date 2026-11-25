@@ -15,6 +15,12 @@ repositories {
 		url = "https://maven.nucleoid.xyz/"
 		content { includeGroup "eu.pb4" }
 	}
+	maven {
+		url = "https://maven.isxander.dev/releases/"
+		content { includeGroup "dev.isxander" }
+		// Its Gradle metadata has several loader variants Loom cannot pick between; use the POM.
+		metadataSources { mavenPom(); artifact(); ignoreGradleMetadataRedirection() }
+	}
 	// Add repositories to retrieve artifacts from in here.
 	// You should only use this when depending on other mods because
 	// Loom adds the essential maven repositories to download Minecraft and libraries from automatically.
@@ -56,6 +62,8 @@ dependencies {
 	// Mod Menu: dev-only (never shipped in the jar). Lets runClient show the Mods screen.
 	compileOnly "com.terraformersmc:modmenu:${project.modmenu_version}"
 	localRuntime "com.terraformersmc:modmenu:${project.modmenu_version}"
+	// Controlify: optional controller binding, compile-only (never bundled or required).
+	compileOnly("dev.isxander:controlify:${project.controlify_version}:fabric") { transitive = false }
 
 	// Unit tests (pure logic). In-game checks live in the client gametest.
 	testImplementation platform("org.junit:junit-bom:${project.junit_version}")
