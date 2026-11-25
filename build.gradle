@@ -4,7 +4,6 @@ plugins {
 }
 
 repositories {
-	// Pocket libraries are published to ~/.m2 (see docs/pocket-26.3-port).
 	// Mod Menu (dev-only, so you can open the Mods screen in runClient).
 	maven {
 		name = "TerraformersMC"
@@ -15,12 +14,6 @@ repositories {
 		name = "Nucleoid"
 		url = "https://maven.nucleoid.xyz/"
 		content { includeGroup "eu.pb4" }
-	}
-	mavenLocal {
-		content {
-			includeGroup "com.pocketcanvascore"
-			includeGroup "com.pocketuicore"
-		}
 	}
 	// Add repositories to retrieve artifacts from in here.
 	// You should only use this when depending on other mods because
@@ -55,15 +48,6 @@ dependencies {
 
 	// Fabric API. This is technically optional, but you probably want it anyway.
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
-
-	// PocketCanvasCore: procedural drawing (drawRect/drawRoundedRect/drawCircle + PocketTheme).
-	// `include` nests it in the mod jar so players do not need it separately.
-	implementation "com.pocketcanvascore:pocketcanvascore:${project.pocketcanvascore_version}"
-	include "com.pocketcanvascore:pocketcanvascore:${project.pocketcanvascore_version}"
-
-	// PocketUICore: component UI framework (PocketScreen, VerticalListPanel, GridPanel, HoverButton, SDL gamepad support).
-	implementation "com.pocketuicore:pocketuicore:${project.pocketuicore_version}"
-	include "com.pocketuicore:pocketuicore:${project.pocketuicore_version}"
 
 	// sgui: server-side chest GUIs (no client mod needed).
 	implementation "eu.pb4:sgui:${project.sgui_version}"

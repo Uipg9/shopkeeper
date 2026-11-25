@@ -2,19 +2,13 @@ package dev.brian.shopkeeper.client;
 
 import dev.brian.shopkeeper.Shopkeeper;
 import com.mojang.blaze3d.platform.InputConstants;
-import com.pocketcanvascore.render.PocketTheme;
 import com.terraformersmc.modmenu.ModMenu;
 import com.terraformersmc.modmenu.gui.ModsScreen;
-import java.awt.image.BufferedImage;
-import java.io.IOException;
 import java.lang.reflect.Field;
-import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
-import java.util.function.Function;
 import java.util.function.Predicate;
-import javax.imageio.ImageIO;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
@@ -24,8 +18,6 @@ import dev.brian.shopkeeper.ShopService;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.gui.screens.inventory.ContainerScreen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
-import net.minecraft.client.input.KeyEvent;
-import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Inventory;
@@ -40,58 +32,9 @@ import net.minecraft.world.item.ItemStack;
  * Run with {@code .\gradlew.bat runClientGameTest}; screenshots land in
  * {@code build\run\clientGameTest\screenshots}.
  *
- * <p>Mixin check: both mixin configs use {@code "defaultRequire": 1}, so a mixin that fails to
- * apply crashes the boot, which fails this test.
+ * In-game smoke test for the shop (the mod has no mixins).
  */
 public class ShopkeeperClientGameTest implements FabricClientGameTest {
-	private static void clickGui(ClientGameTestContext context, Function<ExamplePocketScreen, int[]> target) {
-		double[] pos = context.computeOnClient(mc -> {
-			if (!(mc.gui.screen() instanceof ExamplePocketScreen screen)) {
-				return null;
-			}
-			double scale = mc.getWindow().getGuiScale();
-			int[] c = target.apply(screen);
-			return new double[] { c[0] * scale, c[1] * scale };
-		});
-		if (pos == null) {
-			throw new AssertionError("ExamplePocketScreen is not the current screen");
-		}
-		context.getInput().setCursorPos(pos[0], pos[1]);
-		context.waitTicks(3);
-		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
-		context.waitTicks(3);
-	}
-
-	private static void expectText(ClientGameTestContext context, String expected, String step) {
-		String actual = context.computeOnClient(
-			mc -> mc.gui.screen() instanceof ExamplePocketScreen screen ? screen.inputText() : null);
-		if (!expected.equals(actual)) {
-			throw new AssertionError(step + ": expected text '" + expected + "' but was '" + actual + "'");
-		}
-	}
-
-	private static void assertColorPresent(Path png, int argb, String what) {
-		assertColorPresent(png, argb, what, 50);
-	}
-
-	private static void assertColorPresent(Path png, int argb, String what, long minHits) {
-		try {
-			BufferedImage img = ImageIO.read(png.toFile());
-			int rgb = argb & 0xFFFFFF;
-			long hits = 0;
-			for (int y = 0; y < img.getHeight(); y++) {
-				for (int x = 0; x < img.getWidth(); x++) {
-					if ((img.getRGB(x, y) & 0xFFFFFF) == rgb) hits++;
-				}
-			}
-			if (hits < minHits) {
-				throw new AssertionError(what + " not found in " + png + " (matching pixels: " + hits + ")");
-			}
-		} catch (IOException e) {
-			throw new AssertionError("could not read screenshot " + png, e);
-		}
-	}
-
 	@Override
 	public void runTest(ClientGameTestContext context) {
 		if (!FabricLoader.getInstance().isModLoaded(Shopkeeper.MOD_ID)) {
@@ -125,69 +68,6 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 			context.getInput().pressKey(options -> options.keyInventory);
 			context.waitTicks(10);
 			context.takeScreenshot("inventory_closed");
-
-			// PocketCanvasCore: render a screen and confirm its theme colors really reached the frame.
-			context.setScreen(ExampleCanvasScreen::new);
-			context.waitTicks(10);
-			Path shot = context.takeScreenshot("pocketcanvas");
-			assertColorPresent(shot, PocketTheme.ACCENT_PRIMARY, "ACCENT_PRIMARY bar");
-			assertColorPresent(shot, PocketTheme.ACCENT_SECONDARY, "ACCENT_SECONDARY circle");
-
-			// PocketUICore: open a PocketScreen, click its button with a real simulated mouse
-			// (left = InputConstants.MOUSE_BUTTON_LEFT, 1-based on 26.3), then close it with Escape.
-			context.setScreen(ExamplePocketScreen::new);
-			context.waitTicks(10);
-			Path uiShot = context.takeScreenshot("pocketui_open");
-			assertColorPresent(uiShot, PocketTheme.BACKGROUND_ELEVATED, "HoverButton fill", 500);
-			clickGui(context, ExamplePocketScreen::counterCenter);
-			int clicks = context.computeOnClient(mc -> ExamplePocketScreen.clicks);
-			if (clicks != 1) {
-				throw new AssertionError("expected 1 click on the PocketUICore button, got " + clicks);
-			}
-			context.takeScreenshot("pocketui_clicked");
-
-			// Keyboard: focus the text input by clicking it, then type and edit with real key input.
-			clickGui(context, ExamplePocketScreen::inputCenter);
-			context.getInput().typeChars("hello");
-			context.waitTicks(2);
-			expectText(context, "hello", "typing");
-			context.getInput().pressKey(InputConstants.KEY_BACKSPACE);
-			context.waitTicks(2);
-			expectText(context, "hell", "Backspace");
-			context.getInput().pressKey(InputConstants.KEY_LEFT);
-			context.getInput().typeChars("X");
-			context.waitTicks(2);
-			expectText(context, "helXl", "Left arrow then typing");
-			context.getInput().pressKey(InputConstants.KEY_HOME);
-			context.getInput().typeChars("<");
-			context.waitTicks(2);
-			expectText(context, "<helXl", "Home then typing");
-			// Fabric's test input does not propagate modifier bits on 26.3 (holdControl() still delivers
-			// modifiers=0 to the screen), so dispatch a Ctrl+A KeyEvent directly: SDL scancode KEY_A with
-			// the SDL MOD_CONTROL mask, which is what the real keyboard path produces.
-			context.runOnClient(mc -> {
-				if (mc.gui.screen() instanceof ExamplePocketScreen screen) {
-					screen.keyPressed(new KeyEvent(InputConstants.KEY_A, 'a', InputConstants.MOD_CONTROL));
-				}
-			});
-			context.getInput().typeChars("z");
-			context.waitTicks(2);
-			expectText(context, "z", "Ctrl+A then typing replaces the selection");
-			context.takeScreenshot("pocketui_typed");
-			// First Escape: the focused text input consumes it (unfocus); the screen stays open.
-			context.getInput().pressKey(InputConstants.KEY_ESCAPE);
-			context.waitTicks(5);
-			boolean stillOpen = context.computeOnClient(mc -> mc.gui.screen() instanceof ExamplePocketScreen);
-			if (!stillOpen) {
-				throw new AssertionError("first Escape should only unfocus the text input, not close the screen");
-			}
-			// Second Escape: nothing consumes it, so the screen closes.
-			context.getInput().pressKey(InputConstants.KEY_ESCAPE);
-			context.waitTicks(5);
-			boolean closed = context.computeOnClient(mc -> mc.gui.screen() == null);
-			if (!closed) {
-				throw new AssertionError("second Escape did not close the PocketScreen");
-			}
 
 			// Mod Menu (dev-only): the mod must be registered in its list and the Mods screen must open.
 			boolean listed = context.computeOnClient(mc -> ModMenu.MODS.containsKey(Shopkeeper.MOD_ID));

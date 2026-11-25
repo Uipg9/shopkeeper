@@ -3,7 +3,7 @@
 	"id": "shopkeeper",
 	"version": "${version}",
 	"name": "Shopkeeper",
-	"description": "Template Fabric mod for Minecraft 26.3. Generated mods replace this description.",
+	"description": "A server-side chest-GUI shop for Minecraft.",
 	"authors": [
 		"Uipg9"
 	],
@@ -17,26 +17,14 @@
 		"main": [
 			"dev.brian.shopkeeper.Shopkeeper"
 		],
-		"client": [
-			"dev.brian.shopkeeper.client.ShopkeeperClient"
-		],
 		"fabric-client-gametest": [
 			"dev.brian.shopkeeper.client.ShopkeeperClientGameTest"
 		]
 	},
-	"mixins": [
-		"shopkeeper.mixins.json",
-		{
-			"config": "shopkeeper.client.mixins.json",
-			"environment": "client"
-		}
-	],
 	"depends": {
 		"fabricloader": ">=0.20.1",
 		"minecraft": "~26.3",
 		"java": ">=25",
-		"fabric-api": "*",
-		"pocketcanvascore": "*",
-		"pocketuicore": "*"
+		"fabric-api": "*"
 	}
 }

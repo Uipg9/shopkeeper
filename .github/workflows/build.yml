@@ -4,10 +4,9 @@
 # against bad commits.
 
 name: build
-# Manual only: the template depends on PocketCanvasCore from the local maven repo (~/.m2),
-# which GitHub runners do not have. Re-enable push/pull_request once the Pocket libraries
-# are published to a remote maven repository.
-on: workflow_dispatch
+on:
+  push:
+  pull_request:
 
 jobs:
   build:
