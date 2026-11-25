@@ -10,6 +10,9 @@ A single-player `/shop` for **Minecraft 26.3** (Fabric). Earn coins by selling w
 | `/shop balance` | Show your coins |
 | `/shop sell` | Sell the stack in your main hand |
 | `/shop sellall` | Sell every eligible stack in your inventory and hotbar (skips modified, unsellable and locked-tier stacks) and show one summary message |
+| `/sell` | Sell the stack in your main hand (same as `/shop sell`) |
+| `/sell all` | Sell everything eligible (same as `/shop sellall`) |
+| `/buy <item> [quantity]` | Buy without opening the menu, e.g. `/buy oak_log 64` or `/buy "iron ingot" 3` (tab-completes; quantity 1-2304; buys only what fits in your inventory) |
 | `/shop report` | Show today's earnings report |
 | `/shop reload` | Reload the config (operators only) |
 
@@ -68,7 +71,7 @@ On first run `config\shopkeeper.json` is created from the bundled default. Edit 
 | `startingBalance` | Whole number, 0 or more |
 | `sellFraction` | 0.25 to 0.40; default sell price is `floor(buy * sellFraction)` |
 | `tiers[]` | `id`, `name`, `icon` (item id), `unlockPrice`; the first tier must cost 0 |
-| `items[]` | `id`, `tier`, `buy` (above 0); optional `sell` (below `buy`), optional `maxStack` (1-99); max 45 items per tier |
+| `items[]` | `id`, `tier`, `buy` (above 0); optional `sell` (below `buy`), optional `maxStack` (1-99); max 450 items per tier (the menu shows 45 per page with Previous/Next arrows); without an explicit `sell`, every item with `buy` of 2 or more sells for at least 1 |
 | `blackMarket` | Optional. `enabled` (default `true`), `slots` (1-9, default 6) |
 
 An item whose sell price works out below 1 simply cannot be sold.
