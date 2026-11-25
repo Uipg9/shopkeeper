@@ -229,6 +229,20 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 			context.waitTicks(10);
 		}
 
+		private void chatCommand(String cmd) {
+			context.getInput().pressKey(options -> options.keyCommand);
+			context.waitTicks(5);
+			context.getInput().typeChars(cmd);
+			context.waitTicks(2);
+			context.getInput().pressKey(InputConstants.KEY_RETURN);
+			context.waitTicks(10);
+		}
+
+		private static long sellPriceSum(long fallback) {
+			ShopService svc = ShopService.get();
+			return svc.config().item("minecraft:stone").sell() * 10 + svc.config().item("minecraft:baked_potato").sell() * 5;
+		}
+
 		private void assertUnchanged(String step, long bal, Map<String, Integer> inv) {
 			context.waitTicks(6);
 			expect(balance() == bal, step + ": balance changed from " + bal + " to " + balance());
@@ -387,6 +401,38 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 			expect(balance() == bal, "closing changed the balance");
 			finalBalance = bal;
 			pass("7 close button closes the menu (final balance " + bal + ")");
+
+			// 8. /shop sell (main hand) and /shop sellall (inventory + hotbar), real chat input.
+			world.getServer().runCommand("clear @p");
+			world.getServer().computeOnServer(server -> {
+				server.getPlayerList().getPlayers().getFirst().getInventory().setSelectedSlot(0);
+				return null;
+			});
+			context.waitTicks(4);
+			give("minecraft:potato 20");
+			give("minecraft:diamond_sword");
+			give("minecraft:diamond_sword 1");
+			give("minecraft:potato[minecraft:custom_name=\"Fancy\"] 3");
+			give("minecraft:stone 10");
+			give("minecraft:baked_potato 5");
+			bal = balance();
+			chatCommand("shop sell");
+			expect(count("minecraft:potato") == 3, "/shop sell: potatoes left " + count("minecraft:potato") + ", expected 3 (named)");
+			expect(balance() >= bal + 3L * 20, "/shop sell: credited " + (balance() - bal) + ", expected >= 60");
+			bal = balance();
+			pass("8a /shop sell sold the 20 potatoes in hand (balance " + bal + ")");
+
+			chatCommand("shop sellall");
+			expect(count("minecraft:potato") == 3, "/shop sellall sold the renamed potatoes");
+			expect(count("minecraft:diamond_sword") == 2, "/shop sellall touched unsellable swords");
+			expect(count("minecraft:stone") == 0 && count("minecraft:baked_potato") == 0,
+				"/shop sellall left sellable stacks: " + inventory());
+			long base = 5L * 10 + 7L * 5;
+			long sums = world.getServer().computeOnServer(server -> sellPriceSum(base));
+			expect(balance() >= bal + sums, "/shop sellall credited " + (balance() - bal) + ", expected >= " + sums);
+			bal = balance();
+			finalBalance = bal;
+			pass("8b /shop sellall sold stone + baked potatoes, skipped renamed potatoes and swords (balance " + bal + ")");
 		}
 	}
 }

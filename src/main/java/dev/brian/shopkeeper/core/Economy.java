@@ -37,6 +37,26 @@ public final class Economy {
 		this.items = config.itemIndex();
 	}
 
+	private Daily.Deal deal;
+
+	public void setDeal(Daily.Deal deal) {
+		this.deal = deal;
+	}
+
+	public Daily.Deal deal() {
+		return deal;
+	}
+
+	/** Effective buy price including today's sale. */
+	public long buyPrice(ShopConfig.Item item) {
+		return deal != null && item.id().equals(deal.cheapId()) ? Daily.cheapBuy(item) : item.buy();
+	}
+
+	/** Effective sell price including today's hot item. */
+	public long sellPrice(ShopConfig.Item item) {
+		return deal != null && item.sellable() && item.id().equals(deal.hotId()) ? Daily.hotSell(item) : item.sell();
+	}
+
 	public ShopConfig config() {
 		return config;
 	}
@@ -84,7 +104,7 @@ public final class Economy {
 		if (deliver <= 0) return Result.fail("no room in inventory");
 		long cost;
 		try {
-			cost = Math.multiplyExact(item.buy(), (long) deliver);
+			cost = Math.multiplyExact(buyPrice(item), (long) deliver);
 		} catch (ArithmeticException ex) {
 			return Result.fail("price overflow");
 		}
@@ -111,7 +131,7 @@ public final class Economy {
 		long credit;
 		long newBalance;
 		try {
-			credit = Math.multiplyExact(item.sell(), (long) qty);
+			credit = Math.multiplyExact(sellPrice(item), (long) qty);
 			newBalance = Math.addExact(p.balance, credit);
 		} catch (ArithmeticException ex) {
 			return Result.fail("balance overflow");

@@ -1,5 +1,6 @@
 package dev.brian.shopkeeper;
 
+import dev.brian.shopkeeper.core.Daily;
 import dev.brian.shopkeeper.core.Economy;
 import dev.brian.shopkeeper.core.ShopConfig;
 import dev.brian.shopkeeper.core.ShopConfigParser;
@@ -40,6 +41,7 @@ public final class ShopService {
 	private final ShopData data;
 	private ShopConfig config;
 	private Economy economy;
+	private MinecraftServer server;
 
 	private ShopService(ShopData data, Path configPath, ShopConfig config) {
 		this.data = data;
@@ -73,6 +75,8 @@ public final class ShopService {
 		}
 		if (loaded.config() == null) throw new IllegalStateException("bundled default shop config is invalid");
 		instance = new ShopService(ShopData.get(server), path, loaded.config());
+		instance.server = server;
+		instance.refreshDeal();
 		instance.unknownItemIds().forEach(id -> LOG.warn("Config item '{}' is not a known item id", id));
 	}
 
@@ -100,6 +104,17 @@ public final class ShopService {
 		return economy;
 	}
 
+	/** Recomputes today's deal from the overworld day and seed. Never persisted. */
+	public void refreshDeal() {
+		if (server == null) return;
+		var level = server.overworld();
+		refreshDeal(level.getOverworldClockTime() / 24000L, level.getSeed());
+	}
+
+	public void refreshDeal(long day, long seed) {
+		economy.setDeal(Daily.pick(day, seed, config));
+	}
+
 	public void save() {
 		data.capture(economy.snapshot());
 		data.setDirty();
@@ -119,6 +134,7 @@ public final class ShopService {
 		next.restore(economy.snapshot());
 		config = r.config();
 		economy = next;
+		refreshDeal();
 		unknownItemIds().forEach(id -> LOG.warn("Config item '{}' is not a known item id", id));
 		return List.of();
 	}

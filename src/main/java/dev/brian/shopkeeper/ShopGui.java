@@ -97,6 +97,7 @@ public final class ShopGui extends SimpleGui {
 		for (int i = 0; i < 54; i++) clearSlot(i);
 		ShopService svc = ShopService.get();
 		if (svc == null) return;
+		svc.refreshDeal();
 		ShopConfig cfg = svc.config();
 		Economy eco = svc.economy();
 		if (selectedTab >= cfg.tiers().size()) selectedTab = 0;
@@ -126,9 +127,20 @@ public final class ShopGui extends SimpleGui {
 		for (int i = 0; i < shown.size(); i++) {
 			ShopConfig.Item it = shown.get(i);
 			Item item = resolve(it.id()).orElse(Items.BARRIER);
-			String lore = it.sellable() ? "Buy: " + it.buy() + "  Sell: " + it.sell() : "Buy: " + it.buy() + "  Not sellable";
-			setSlot(ShopRouter.ITEM_START + i, new GuiElementBuilder(item)
-				.addLoreLine(Component.literal(lore).withStyle(ChatFormatting.GRAY)));
+			long buyNow = eco.buyPrice(it);
+			long sellNow = eco.sellPrice(it);
+			String lore = it.sellable() ? "Buy: " + buyNow + "  Sell: " + sellNow : "Buy: " + buyNow + "  Not sellable";
+			GuiElementBuilder eb = new GuiElementBuilder(item)
+				.addLoreLine(Component.literal(lore).withStyle(ChatFormatting.GRAY));
+			if (it.sellable() && sellNow != it.sell()) {
+				eb.addLoreLine(Component.literal("HOT: sells for " + sellNow + " (normal " + it.sell() + ")").withStyle(ChatFormatting.GOLD));
+				eb.glow();
+			}
+			if (buyNow != it.buy()) {
+				eb.addLoreLine(Component.literal("SALE: buy for " + buyNow + " (normal " + it.buy() + ")").withStyle(ChatFormatting.GOLD));
+				eb.glow();
+			}
+			setSlot(ShopRouter.ITEM_START + i, eb);
 		}
 	}
 
@@ -156,6 +168,7 @@ public final class ShopGui extends SimpleGui {
 			close();
 			return;
 		}
+		svc.refreshDeal();
 		ShopConfig cfg = svc.config();
 		Economy eco = svc.economy();
 		boolean fresh = !eco.hasPlayer(id);
