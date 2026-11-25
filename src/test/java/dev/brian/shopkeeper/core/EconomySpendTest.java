@@ -28,4 +28,14 @@ class EconomySpendTest {
 		assertTrue(e.spend(id, 70).ok());
 		assertEquals(0, e.balance(id));
 	}
+
+	@Test
+	void spendCountsAsOneItemBought() {
+		UUID id = UUID.randomUUID();
+		Economy e = eco(id);
+		e.setDay(1);
+		assertTrue(e.spend(id, 30).ok());
+		assertEquals(1, e.today(id).itemsBought());
+		assertEquals(30, e.today(id).spent());
+	}
 }

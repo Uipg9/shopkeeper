@@ -102,7 +102,7 @@ public final class Economy {
 	public Set<Integer> blackMarketBought(UUID id, long day) {
 		Player p = players.get(id);
 		if (p == null) return Set.of();
-		if (p.bmDay != day) {
+		if (day > p.bmDay) { // never clear because a clock went backwards
 			p.bmSlots.clear();
 			p.bmDay = day;
 		}
@@ -196,14 +196,14 @@ public final class Economy {
 		return q;
 	}
 
-	/** Charges an arbitrary price (black market). All-or-nothing on funds; counts as spending in today's stats. */
+	/** Charges an arbitrary price (black market). All-or-nothing on funds; counts as one item bought in today's stats. */
 	public Result spend(UUID id, long price) {
 		Player p = players.get(id);
 		if (p == null) return Result.fail("unknown player");
 		if (price <= 0) return Result.fail("price must be positive");
 		if (price > p.balance) return Result.fail("insufficient funds");
 		p.balance = Math.subtractExact(p.balance, price);
-		p.stats = roll(p).withPurchase(0, price);
+		p.stats = roll(p).withPurchase(1, price);
 		return new Result(true, price, 0, 0, 0, null);
 	}
 

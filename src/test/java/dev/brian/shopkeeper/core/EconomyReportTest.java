@@ -175,6 +175,16 @@ class EconomyReportTest {
 	}
 
 	@Test
+	void blackMarketNeverClearsWhenDayGoesBackwards() {
+		Economy e = eco(100);
+		assertTrue(e.markBlackMarketBought(p, 5, 0));
+		assertTrue(e.isBlackMarketBought(p, 3, 0)); // earlier day treated as stored day
+		assertTrue(e.isBlackMarketBought(p, 5, 0));
+		assertFalse(e.markBlackMarketBought(p, 3, 0));
+		assertFalse(e.isBlackMarketBought(p, 6, 0)); // later day clears
+	}
+
+	@Test
 	void blackMarketSurvivesSnapshot() {
 		Economy e = eco(100);
 		e.markBlackMarketBought(p, 5, 3);

@@ -41,15 +41,28 @@ public final class ShopGui extends SimpleGui {
 	private int selectedTab = 0;
 	private boolean blackMarketSelected = false;
 
-	private long day() {
-		return player.level().getServer().overworld().getOverworldClockTime() / 24000L;
-	}
+	/** Day the black market was last rendered with (eco.day()); a click on a different day is stale. */
+	private long renderedDay = Long.MIN_VALUE;
 
-	/** Today's offers, same day+seed as ShopService.refreshDeal. */
-	private List<BlackMarket.Offer> offers(ShopService svc) {
+	/** Offers for the given (monotonic shop) day, same seed as ShopService.refreshDeal. */
+	private List<BlackMarket.Offer> offers(ShopService svc, long day) {
 		var server = player.level().getServer();
 		if (server == null) return List.of();
-		return BlackMarket.generate(day(), server.overworld().getSeed(), svc.config());
+		return BlackMarket.generate(day, server.overworld().getSeed(), svc.config());
+	}
+
+	/** The tier of an offer's item, or null if the item is not in the config. */
+	private static ShopConfig.Tier tierOf(ShopConfig cfg, BlackMarket.Offer o) {
+		ShopConfig.Item it = cfg.item(o.itemId());
+		return it == null ? null : cfg.tier(it.tier());
+	}
+
+	/** Name of the locked tier an offer needs, or null if the player may buy it. */
+	private String lockedTierName(ShopConfig cfg, Economy eco, BlackMarket.Offer o) {
+		ShopConfig.Item it = cfg.item(o.itemId());
+		if (it == null || eco.isUnlocked(id, it.tier())) return null;
+		ShopConfig.Tier t = tierOf(cfg, o);
+		return t == null ? it.tier() : t.name();
 	}
 
 	/** Closes every shop menu currently on screen (used after a config reload). */
@@ -114,7 +127,9 @@ public final class ShopGui extends SimpleGui {
 		ShopConfig cfg = svc.config();
 		Economy eco = svc.economy();
 		if (selectedTab >= cfg.tiers().size()) selectedTab = 0;
-		List<BlackMarket.Offer> offers = offers(svc);
+		long day = eco.day();
+		renderedDay = day;
+		List<BlackMarket.Offer> offers = offers(svc, day);
 		if (offers.isEmpty()) blackMarketSelected = false;
 
 		for (int t = 0; t < ShopRouter.TAB_COUNT && t < cfg.tiers().size(); t++) {
@@ -146,12 +161,11 @@ public final class ShopGui extends SimpleGui {
 
 		if (blackMarketSelected) {
 			var access = player.level().registryAccess();
-			long day = day();
 			for (BlackMarket.Offer o : offers) {
 				int slot = ShopRouter.ITEM_START + o.slot();
 				if (o.slot() < 0 || slot >= ShopRouter.ITEM_END) continue;
 				boolean sold = eco.isBlackMarketBought(id, day, o.slot());
-				ItemStack stack = BlackMarketStock.display(access, o, sold);
+				ItemStack stack = BlackMarketStock.display(access, o, sold, lockedTierName(cfg, eco, o));
 				if (stack.isEmpty()) continue;
 				if (sold) {
 					setSlot(slot, new GuiElementBuilder(Items.STAINED_GLASS_PANE.gray()).setName(plain("Sold out", ChatFormatting.GRAY)));
@@ -212,7 +226,7 @@ public final class ShopGui extends SimpleGui {
 		boolean fresh = !eco.hasPlayer(id);
 		eco.ensurePlayer(id);
 		if (fresh) svc.save();
-		boolean bmShown = !offers(svc).isEmpty();
+		boolean bmShown = !offers(svc, eco.day()).isEmpty();
 		if (!bmShown) blackMarketSelected = false;
 		Action act = ShopRouter.route(index, kind, t -> t < cfg.tiers().size() && eco.isUnlocked(id, cfg.tiers().get(t).id()),
 			bmShown, blackMarketSelected);
@@ -307,18 +321,32 @@ public final class ShopGui extends SimpleGui {
 	/** Re-generates today's offers at click time; the menu contents are never trusted. */
 	private void buyOffer(ShopService svc, int offerSlot) {
 		Economy eco = svc.economy();
+		ShopConfig cfg = svc.config();
+		long day = eco.day(); // read once per click
+		if (day != renderedDay) {
+			refresh();
+			fail("Stock changed - check the new offers.");
+			return;
+		}
 		BlackMarket.Offer offer = null;
-		for (BlackMarket.Offer o : offers(svc)) {
+		for (BlackMarket.Offer o : offers(svc, day)) {
 			if (o.slot() == offerSlot) offer = o;
 		}
 		if (offer == null) return;
-		long day = day();
+		String locked = lockedTierName(cfg, eco, offer);
+		if (locked != null) {
+			fail("Unlock the " + locked + " tier first.");
+			return;
+		}
 		if (eco.isBlackMarketBought(id, day, offer.slot())) {
 			fail("Already sold out.");
 			return;
 		}
 		ItemStack give = BlackMarketStock.make(player.level().registryAccess(), offer);
-		if (give.isEmpty()) return;
+		if (give.isEmpty()) {
+			fail("That item is unavailable.");
+			return;
+		}
 		int max = give.getMaxStackSize();
 		int fits = 0;
 		for (ItemStack in : player.getInventory().getNonEquipmentItems()) {

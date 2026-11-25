@@ -10,6 +10,7 @@ A single-player `/shop` for **Minecraft 26.3** (Fabric). Earn coins by selling w
 | `/shop balance` | Show your coins |
 | `/shop sell` | Sell the stack in your main hand |
 | `/shop sellall` | Sell every eligible stack in your inventory and hotbar (skips modified, unsellable and locked-tier stacks) and show one summary message |
+| `/shop report` | Show today's earnings report |
 | `/shop reload` | Reload the config (operators only) |
 
 ## How it works
@@ -29,6 +30,18 @@ Selling pays 30% of the buy price by default (rounded down). The config enforces
 
 Each Minecraft day one item is **HOT** (sells at x1.5, never above its buy price) and a different one is on **SALE** (buys at x0.75, never below its sell price). They are picked from the world seed and the day, so nothing is saved. Deals show in the item tooltip with a glow. Any tier can be picked, but a deal only helps if you have unlocked that tier.
 
+## Daily earnings report
+
+When the Minecraft day rolls over (or when you log in) you get one chat line for the previous day: coins earned, spent and net, items sold and bought, your best sale, and a verdict (Great day! / Decent day. / Quiet day. / Rough day...). Days with no activity are skipped. `/shop report` shows today's on demand.
+
+## Black Market
+
+A tab in the shop menu offers a few cheap, used vanilla gear pieces each day: partial durability and a couple of modest enchantments. Stock rotates every Minecraft day from the world seed, and each offer can be bought once per day. No new items are added to the game.
+
+- Gear costs at most 70% of the new price.
+- You can't sell it back (the shop only buys unmodified items).
+- Gear from a tier you haven't unlocked shows "Requires <tier> tier" and can't be bought until you unlock that tier.
+
 ## Config
 
 On first run `config\shopkeeper.json` is created from the bundled default. Edit it, then run `/shop reload`. If the file is invalid, the old config stays active and the errors are logged and shown in chat. (If the file is already invalid at startup, the bundled default is used and the file is left untouched.)
@@ -45,7 +58,8 @@ On first run `config\shopkeeper.json` is created from the bundled default. Edit 
     {"id": "minecraft:wheat_seeds", "tier": "basics", "buy": 2},
     {"id": "minecraft:cooked_beef", "tier": "basics", "buy": 24, "sell": 15},
     {"id": "minecraft:iron_pickaxe", "tier": "underground", "buy": 120, "maxStack": 1}
-  ]
+  ],
+  "blackMarket": {"enabled": true, "slots": 6}
 }
 ```
 
@@ -55,8 +69,11 @@ On first run `config\shopkeeper.json` is created from the bundled default. Edit 
 | `sellFraction` | 0.25 to 0.40; default sell price is `floor(buy * sellFraction)` |
 | `tiers[]` | `id`, `name`, `icon` (item id), `unlockPrice`; the first tier must cost 0 |
 | `items[]` | `id`, `tier`, `buy` (above 0); optional `sell` (below `buy`), optional `maxStack` (1-99); max 45 items per tier |
+| `blackMarket` | Optional. `enabled` (default `true`), `slots` (1-9, default 6) |
 
 An item whose sell price works out below 1 simply cannot be sold.
+
+Only gear that is present in `items[]` can appear in the Black Market: wooden, stone, golden, chainmail, iron, diamond and turtle tools and armor, plus bow, crossbow, fishing rod and shield. Netherite, mace, trident and elytra never appear.
 
 ## Requirements
 

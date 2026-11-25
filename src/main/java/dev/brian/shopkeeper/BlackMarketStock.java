@@ -32,7 +32,7 @@ final class BlackMarketStock {
 		return (int) Math.max(0, Math.min(100, Math.round(durabilityLeft * 100)));
 	}
 
-	/** The gear itself (damaged, enchanted, no lore); EMPTY if the item is unknown or not damageable. */
+	/** The gear itself (damaged, enchanted, no lore); EMPTY if the item is unknown, not damageable, or any enchant cannot be applied. */
 	static ItemStack make(RegistryAccess access, Offer offer) {
 		Identifier id = Identifier.tryParse(offer.itemId());
 		if (id == null) return ItemStack.EMPTY;
@@ -57,8 +57,8 @@ final class BlackMarketStock {
 		return Component.literal(s).withStyle(Style.EMPTY.withItalic(false).withColor(color));
 	}
 
-	/** The item as shown in the menu: gear plus lore (durability, price, one per day / SOLD OUT). */
-	static ItemStack display(RegistryAccess access, Offer offer, boolean sold) {
+	/** The item as shown in the menu: gear plus lore (durability, price, one per day / SOLD OUT, and a red requirement line when its tier is locked). */
+	static ItemStack display(RegistryAccess access, Offer offer, boolean sold, String lockedTierName) {
 		ItemStack stack = make(access, offer);
 		if (stack.isEmpty()) return stack;
 		int pct = percentLeft(offer.durabilityLeft());
@@ -66,6 +66,7 @@ final class BlackMarketStock {
 		lore.add(line("Used - " + pct + "% durability left", pct >= 40 ? ChatFormatting.GOLD : ChatFormatting.GRAY));
 		lore.add(line("Price: " + offer.price() + " coins", ChatFormatting.YELLOW));
 		lore.add(sold ? line("SOLD OUT", ChatFormatting.RED) : line("One per day", ChatFormatting.GRAY));
+		if (lockedTierName != null) lore.add(line("Requires " + lockedTierName + " tier", ChatFormatting.RED));
 		stack.set(DataComponents.LORE, new ItemLore(lore));
 		return stack;
 	}

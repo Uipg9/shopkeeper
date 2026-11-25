@@ -353,12 +353,12 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 			return bal;
 		}
 
-		/** Today's black market offers, computed like ShopGui does (overworld clock day + world seed). */
+		/** Today's black market offers, computed like ShopGui does (the shop's monotonic day + world seed). */
 		private java.util.List<dev.brian.shopkeeper.core.BlackMarket.Offer> todaysOffers() {
 			return world.getServer().computeOnServer(server -> {
 				ShopService.get().refreshDeal();
 				var level = server.overworld();
-				return dev.brian.shopkeeper.core.BlackMarket.generate(level.getOverworldClockTime() / 24000L, level.getSeed(),
+				return dev.brian.shopkeeper.core.BlackMarket.generate(ShopService.get().economy().day(), level.getSeed(),
 					ShopService.get().config());
 			});
 		}
@@ -417,10 +417,14 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 			context.waitTicks(3);
 		}
 
+		/** Tier id of an offer's item. */
+		private String offerTier(dev.brian.shopkeeper.core.BlackMarket.Offer o) {
+			return world.getServer().computeOnServer(server -> ShopService.get().config().item(o.itemId()).tier());
+		}
+
 		private long blackMarket(long bal) {
 			var offers = todaysOffers();
 			expect(!offers.isEmpty(), "black market generated no offers");
-			var o = offers.get(0);
 			world.getServer().computeOnServer(server -> {
 				ShopService.get().economy().refund(server.getPlayerList().getPlayers().getFirst().getUUID(), 20000);
 				return null;
@@ -428,6 +432,36 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 			bal += 20000;
 			expect(balance() == bal, "black market refund bookkeeping: " + balance() + " vs " + bal);
 
+			// Path (a): a buyable offer in an unlocked tier; unlock the first offer's tier if none is.
+			dev.brian.shopkeeper.core.BlackMarket.Offer o = null;
+			for (var cand : offers) {
+				if (unlocked(offerTier(cand))) {
+					o = cand;
+					break;
+				}
+			}
+			if (o == null) {
+				o = offers.get(0);
+				String tier = offerTier(o);
+				long unlockPrice = world.getServer().computeOnServer(server -> {
+					var res = ShopService.get().economy().unlock(server.getPlayerList().getPlayers().getFirst().getUUID(), tier);
+					expect(res.ok(), "test unlock of " + tier + " failed: " + res.error());
+					return res.charged();
+				});
+				bal -= unlockPrice;
+				expect(balance() == bal, "black market unlock bookkeeping: " + balance() + " vs " + bal);
+				System.out.println("[shopkeeper-test] NOTE no offer was in an unlocked tier; unlocked " + tier + " for " + unlockPrice);
+			}
+			// Path (b): an offer whose tier is still locked.
+			dev.brian.shopkeeper.core.BlackMarket.Offer locked = null;
+			for (var cand : offers) {
+				if (!unlocked(offerTier(cand))) {
+					locked = cand;
+					break;
+				}
+			}
+
+			final var offer = o;
 			click(6);
 			int slot = 9 + o.slot();
 			ItemStack shown = clientSlot(slot);
@@ -447,6 +481,23 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 			context.waitTicks(10);
 			context.takeScreenshot("shop_black_market_tooltip");
 			pass("A1 black market tab shows " + o.itemId() + " dmg " + damage + " ench " + o.enchants() + " price " + o.price());
+
+			if (locked != null) {
+				int lslot = 9 + locked.slot();
+				String llore = lore(lslot);
+				expect(llore.contains("Requires") && llore.contains("tier"), "locked offer lore has no requirement: " + llore);
+				expect(isItem(clientSlot(lslot), locked.itemId()), "locked offer is not shown: " + clientSlot(lslot));
+				hover(lslot);
+				context.waitTicks(10);
+				context.takeScreenshot("shop_black_market_locked_tooltip");
+				Map<String, Integer> inv0 = inventory();
+				click(lslot);
+				assertUnchanged("click a black market offer in a locked tier", bal, inv0);
+				expect(isItem(clientSlot(lslot), locked.itemId()), "locked offer changed after the click: " + clientSlot(lslot));
+				pass("A1b locked-tier offer " + locked.itemId() + " shows 'Requires' lore and cannot be bought");
+			} else {
+				System.out.println("[shopkeeper-test] NOTE every tier is unlocked; locked-tier offer check skipped");
+			}
 
 			// Buy it.
 			Map<String, Integer> want = enchantsOf(o.enchants());
@@ -469,7 +520,7 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 			assertUnchanged("click a sold out black market slot", bal, inv);
 
 			// Selling the bought (modified) gear back must be refused.
-			click(playerSlot(st -> isItem(st, o.itemId()) && st.getDamageValue() == damage, "bought gear"));
+			click(playerSlot(st -> isItem(st, offer.itemId()) && st.getDamageValue() == damage, "bought gear"));
 			assertUnchanged("sell back black market gear", bal, inv);
 			expect(usedGearCount(o.itemId(), damage, want) == before + 1, "bought gear vanished after sell-back click");
 
