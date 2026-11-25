@@ -17,6 +17,9 @@
 		"main": [
 			"dev.brian.shopkeeper.Shopkeeper"
 		],
+		"client": [
+			"dev.brian.shopkeeper.client.ShopkeeperClient"
+		],
 		"fabric-client-gametest": [
 			"dev.brian.shopkeeper.client.ShopkeeperClientGameTest"
 		]

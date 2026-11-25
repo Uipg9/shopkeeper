@@ -70,6 +70,20 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 			context.waitTicks(10);
 			context.takeScreenshot("inventory_closed");
 
+			// Open Shop keybind: the registered key (default B) must open the shop chest menu.
+			boolean registered = context.computeOnClient(mc -> ShopkeeperClient.openShop != null
+				&& java.util.Arrays.asList(mc.options.keyMappings).contains(ShopkeeperClient.openShop));
+			if (!registered) {
+				throw new AssertionError("Open Shop key mapping is not registered in options");
+			}
+			context.getInput().pressKey(InputConstants.KEY_B);
+			context.waitForScreen(ContainerScreen.class);
+			context.waitTicks(10); // let the server sync the menu contents
+			context.takeScreenshot("shop_via_keybind");
+			System.out.println("[shopkeeper-test] PASS open shop via keybind");
+			context.getInput().pressKey(InputConstants.KEY_ESCAPE);
+			context.waitTicks(10);
+
 			// Mod Menu (dev-only): the mod must be registered in its list and the Mods screen must open.
 			boolean listed = context.computeOnClient(mc -> ModMenu.MODS.containsKey(Shopkeeper.MOD_ID));
 			if (!listed) {
