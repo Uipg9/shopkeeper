@@ -1,0 +1,42 @@
+{
+	"schemaVersion": 1,
+	"id": "shopkeeper",
+	"version": "${version}",
+	"name": "Shopkeeper",
+	"description": "Template Fabric mod for Minecraft 26.3. Generated mods replace this description.",
+	"authors": [
+		"Uipg9"
+	],
+	"contact": {
+		"homepage": "https://fabricmc.net/"
+	},
+	"license": "CC0-1.0",
+	"icon": "assets/shopkeeper/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"dev.brian.shopkeeper.Shopkeeper"
+		],
+		"client": [
+			"dev.brian.shopkeeper.client.ShopkeeperClient"
+		],
+		"fabric-client-gametest": [
+			"dev.brian.shopkeeper.client.ShopkeeperClientGameTest"
+		]
+	},
+	"mixins": [
+		"shopkeeper.mixins.json",
+		{
+			"config": "shopkeeper.client.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.20.1",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*",
+		"pocketcanvascore": "*",
+		"pocketuicore": "*"
+	}
+}

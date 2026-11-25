@@ -1,0 +1,14 @@
+{
+	"required": true,
+	"package": "dev.brian.shopkeeper.mixin",
+	"compatibilityLevel": "JAVA_25",
+	"mixins": [
+		"ShopkeeperMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	},
+	"overwrites": {
+		"requireAnnotations": true
+	}
+}
