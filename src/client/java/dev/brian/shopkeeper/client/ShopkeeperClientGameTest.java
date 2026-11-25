@@ -18,6 +18,7 @@ import dev.brian.shopkeeper.ShopService;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.gui.screens.inventory.ContainerScreen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Inventory;
@@ -249,6 +250,109 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 			expect(inventory().equals(inv), step + ": inventory changed from " + inv + " to " + inventory());
 		}
 
+		/** Everything the test needs to know about one deal item, read on the server thread. */
+		private record DealItem(String id, String tier, int tierIndex, long buy, long sell, long buyNow, long sellNow, boolean sellable) {}
+
+		private DealItem dealItem(String id) {
+			return world.getServer().computeOnServer(server -> {
+				ShopService svc = ShopService.get();
+				var it = svc.config().item(id);
+				int ti = -1;
+				for (int i = 0; i < svc.config().tiers().size(); i++) {
+					if (svc.config().tiers().get(i).id().equals(it.tier())) ti = i;
+				}
+				var eco = svc.economy();
+				return new DealItem(id, it.tier(), ti, it.buy(), it.sell(), eco.buyPrice(it), eco.sellPrice(it), it.sellable());
+			});
+		}
+
+		/** Menu index (shop area, 9..53) of the slot showing this item, or -1. */
+		private int shopSlot(String id) {
+			return context.computeOnClient(mc -> {
+				AbstractContainerMenu m = mc.player.containerMenu;
+				for (int i = 9; i < 54; i++) if (isItem(m.slots.get(i).getItem(), id)) return i;
+				return -1;
+			});
+		}
+
+		private String lore(int menuIndex) {
+			return context.computeOnClient(mc -> {
+				var l = mc.player.containerMenu.slots.get(menuIndex).getItem().get(DataComponents.LORE);
+				StringBuilder sb = new StringBuilder();
+				if (l != null) l.lines().forEach(c -> sb.append(c.getString()).append('\n'));
+				return sb.toString();
+			});
+		}
+
+		/**
+		 * Daily deals end to end. The picked deal (from the real day + world seed) is NOT overwritten: the GUI re-picks
+		 * on every open/click, so forcing a deal would be undone. Economy-level checks always run; the UI checks run
+		 * for each deal item whose tier is unlocked for the player (Basics always, Underground by now). Locked-tier
+		 * deal items are only checked at economy level (clicking a locked tab would try to buy the unlock).
+		 */
+		private long dailyDeals(long bal) {
+			String[] ids = world.getServer().computeOnServer(server -> {
+				ShopService.get().refreshDeal();
+				var d = ShopService.get().economy().deal();
+				expect(d != null && d.hotId() != null && d.cheapId() != null, "daily deal missing an item: " + d);
+				expect(!d.hotId().equals(d.cheapId()), "hot and cheap are the same item: " + d.hotId());
+				return new String[] { d.hotId(), d.cheapId() };
+			});
+			DealItem hot = dealItem(ids[0]);
+			DealItem cheap = dealItem(ids[1]);
+			expect(hot.sellable() && hot.sellNow() > hot.sell() && hot.sellNow() < hot.buy(),
+				"hot price " + hot.sellNow() + " not in (" + hot.sell() + ", " + hot.buy() + ") for " + hot.id());
+			expect(cheap.buyNow() < cheap.buy() && cheap.buyNow() >= cheap.sell() + 1,
+				"cheap price " + cheap.buyNow() + " not in [" + (cheap.sell() + 1) + ", " + cheap.buy() + ") for " + cheap.id());
+			pass("9a deal today: hot " + hot.id() + " sell " + hot.sell() + "->" + hot.sellNow() + ", cheap " + cheap.id() + " buy " + cheap.buy() + "->" + cheap.buyNow());
+
+			// Funds so the buy can't fail on balance.
+			world.getServer().computeOnServer(server -> {
+				ShopService.get().economy().refund(server.getPlayerList().getPlayers().getFirst().getUUID(), 10000);
+				return null;
+			});
+			bal += 10000;
+			expect(balance() == bal, "refund bookkeeping: " + balance() + " vs " + bal);
+
+			boolean hotUi = unlocked(hot.tier()) && hot.tierIndex() >= 0;
+			boolean cheapUi = unlocked(cheap.tier()) && cheap.tierIndex() >= 0;
+			if (cheapUi) {
+				click(cheap.tierIndex());
+				int slot = shopSlot(cheap.id());
+				expect(slot >= 9, "cheap item " + cheap.id() + " not shown in its unlocked tab");
+				String lore = lore(slot);
+				expect(lore.contains("SALE") && lore.contains("buy for " + cheap.buyNow()) && lore.contains("Buy: " + cheap.buyNow()),
+					"cheap lore wrong: " + lore);
+				context.takeScreenshot("shop_daily_sale");
+				int before = count(cheap.id());
+				click(slot);
+				expect(count(cheap.id()) == before + 1, "cheap buy delivered " + (count(cheap.id()) - before));
+				expect(balance() == bal - cheap.buyNow(), "cheap buy charged " + (bal - balance()) + ", expected " + cheap.buyNow());
+				bal -= cheap.buyNow();
+				pass("9b UI sale: SALE lore shows " + cheap.buyNow() + " and the click charged exactly that");
+			}
+			if (hotUi) {
+				click(hot.tierIndex());
+				int slot = shopSlot(hot.id());
+				expect(slot >= 9, "hot item " + hot.id() + " not shown in its unlocked tab");
+				String lore = lore(slot);
+				expect(lore.contains("HOT") && lore.contains("sells for " + hot.sellNow()) && lore.contains("Sell: " + hot.sellNow()),
+					"hot lore wrong: " + lore);
+				context.takeScreenshot("shop_daily_hot");
+				give(hot.id());
+				int before = count(hot.id());
+				click(playerSlot(st -> isItem(st, hot.id()) && !st.has(DataComponents.CUSTOM_NAME), "unnamed " + hot.id()));
+				expect(count(hot.id()) == before - 1, "hot sell removed " + (before - count(hot.id())));
+				expect(balance() == bal + hot.sellNow(), "hot sell credited " + (balance() - bal) + ", expected " + hot.sellNow());
+				bal += hot.sellNow();
+				pass("9c UI hot: HOT lore shows " + hot.sellNow() + " and the click credited exactly that");
+			}
+			if (!cheapUi || !hotUi) System.out.println("[shopkeeper-test] NOTE deal UI partly skipped (locked tier): hotUi=" + hotUi + " cheapUi=" + cheapUi);
+			click(0); // back to Basics
+			expect(balance() == bal, "deal scenario bookkeeping: " + balance() + " vs " + bal);
+			return bal;
+		}
+
 		void execute() {
 			// 6. Registry check first so a bad id is reported even if clicks later fail.
 			java.util.List<String> unknown = world.getServer().computeOnServer(server -> ShopService.get().unknownItemIds());
@@ -391,6 +495,8 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 			bal += 5L * soldStone;
 			context.takeScreenshot("shop_after_probes");
 			pass("5 probes: swap, number key, drop, clone, drag, double-click, shift on unsellable/named: no dup, no loss, no credit");
+
+			bal = dailyDeals(bal);
 
 			// 7. Close with the Close button.
 			click(8);
