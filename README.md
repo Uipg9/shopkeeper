@@ -8,6 +8,8 @@ A single-player `/shop` for **Minecraft 26.3** (Fabric). Earn coins by selling w
 |---|---|
 | `/shop` | Open the shop |
 | `/shop balance` | Show your coins |
+| `/shop sell` | Sell the stack in your main hand |
+| `/shop sellall` | Sell every eligible stack in your inventory and hotbar (skips modified, unsellable and locked-tier stacks) and show one summary message |
 | `/shop reload` | Reload the config (operators only) |
 
 ## How it works
@@ -22,6 +24,10 @@ Selling pays 30% of the buy price by default (rounded down). The config enforces
 
 - **Growing:** wheat seeds cost 2 coins and a grown wheat sells for 6.
 - **Cooking:** raw beef sells for 3, cooked beef sells for 15 (items can also set their own `sell` price).
+
+## Daily deals
+
+Each Minecraft day one item is **HOT** (sells at x1.5, never above its buy price) and a different one is on **SALE** (buys at x0.75, never below its sell price). They are picked from the world seed and the day, so nothing is saved. Deals show in the item tooltip with a glow. Any tier can be picked, but a deal only helps if you have unlocked that tier.
 
 ## Config
 

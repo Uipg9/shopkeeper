@@ -59,8 +59,9 @@ public final class ShopCommands {
 			source.sendFailure(Component.literal("The shop is not ready."));
 			return 0;
 		}
+		svc.refreshDeal();
 		svc.economy().ensurePlayer(p.getUUID());
-		ShopSell.Outcome o = ShopSell.sellSlot(svc, p, p.getInventory().getSelectedSlot());
+		ShopSell.Outcome o =ShopSell.sellSlot(svc, p, p.getInventory().getSelectedSlot());
 		if (!o.ok()) {
 			source.sendFailure(Component.literal(o.error()));
 			return 0;
@@ -78,6 +79,7 @@ public final class ShopCommands {
 			source.sendFailure(Component.literal("The shop is not ready."));
 			return 0;
 		}
+		svc.refreshDeal();
 		svc.economy().ensurePlayer(p.getUUID());
 		SellPlan.Totals totals = new SellPlan.Totals();
 		for (int slot = 0; slot < 36; slot++) {
