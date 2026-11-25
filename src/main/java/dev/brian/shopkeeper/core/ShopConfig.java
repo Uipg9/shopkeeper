@@ -17,7 +17,7 @@ public record ShopConfig(long startingBalance, double sellFraction, List<Tier> t
 
 	public static final double MIN_SELL_FRACTION = 0.25;
 	public static final double MAX_SELL_FRACTION = 0.40;
-	public static final int MAX_ITEMS_PER_TIER = 45;
+	public static final int MAX_ITEMS_PER_TIER = 450;
 
 	public record Tier(String id, String name, long unlockPrice, String icon) {}
 
@@ -35,9 +35,12 @@ public record ShopConfig(long startingBalance, double sellFraction, List<Tier> t
 		items = List.copyOf(items);
 	}
 
-	/** Builds an item, resolving the effective sell price (explicit, else floor(buy*fraction)). */
+	/**
+	 * Builds an item, resolving the effective sell price: explicit if given, else max(1, floor(buy*fraction)).
+	 * Sellable only when 1 <= sell < buy, so buy == 1 items (and an explicit sell of 0) cannot be sold back.
+	 */
 	public static Item makeItem(String id, String tier, long buy, Long explicitSell, Integer maxStack, double fraction) {
-		long sell = explicitSell != null ? explicitSell : (long) Math.floor((double) buy * fraction);
+		long sell = explicitSell != null ? explicitSell : Math.max(1, (long) Math.floor((double) buy * fraction));
 		boolean sellable = sell >= 1 && sell < buy;
 		return new Item(id, tier, buy, sellable ? sell : 0, sellable, maxStack);
 	}

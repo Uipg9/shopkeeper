@@ -40,6 +40,8 @@ public final class ShopGui extends SimpleGui {
 	private final UUID id;
 	private int selectedTab = 0;
 	private boolean blackMarketSelected = false;
+	/** 0-based page of the selected tier; reset on tab switch, clamped against the live config. */
+	private int page = 0;
 
 	/** Day the black market was last rendered with (eco.day()); a click on a different day is stale. */
 	private long renderedDay = Long.MIN_VALUE;
@@ -112,11 +114,23 @@ public final class ShopGui extends SimpleGui {
 		return BuiltInRegistries.ITEM.getKey(item).toString();
 	}
 
-	private List<ShopConfig.Item> visibleItems(ShopConfig cfg, Economy eco) {
+	/** Every buyable item of the selected tier (all pages); empty when locked. */
+	private List<ShopConfig.Item> tierItems(ShopConfig cfg, Economy eco) {
 		if (selectedTab >= cfg.tiers().size() || selectedTab >= ShopRouter.TAB_COUNT) return List.of();
 		ShopConfig.Tier tier = cfg.tiers().get(selectedTab);
 		if (!eco.isUnlocked(id, tier.id())) return List.of();
-		return cfg.itemsIn(tier.id()).stream().filter(i -> resolve(i.id()).isPresent()).limit(45).toList();
+		return cfg.itemsIn(tier.id()).stream().filter(i -> resolve(i.id()).isPresent()).toList();
+	}
+
+	/** The items on the current page (page must already be clamped). */
+	private List<ShopConfig.Item> pageItems(List<ShopConfig.Item> all) {
+		int from = Math.min(all.size(), page * ShopRouter.PAGE_SIZE);
+		return all.subList(from, Math.min(all.size(), from + ShopRouter.PAGE_SIZE));
+	}
+
+	private static GuiElementBuilder pageButton(String name, int page, int pages) {
+		return new GuiElementBuilder(Items.ARROW).setName(plain(name, ChatFormatting.AQUA))
+			.addLoreLine(Component.literal("Page " + (page + 1) + " of " + pages).withStyle(ChatFormatting.GRAY));
 	}
 
 	private void refresh() {
@@ -131,6 +145,9 @@ public final class ShopGui extends SimpleGui {
 		renderedDay = day;
 		List<BlackMarket.Offer> offers = offers(svc, day);
 		if (offers.isEmpty()) blackMarketSelected = false;
+		List<ShopConfig.Item> all = tierItems(cfg, eco);
+		int pages = ShopRouter.pageCount(all.size());
+		page = ShopRouter.clampPage(page, all.size());
 
 		for (int t = 0; t < ShopRouter.TAB_COUNT && t < cfg.tiers().size(); t++) {
 			ShopConfig.Tier tier = cfg.tiers().get(t);
@@ -152,11 +169,15 @@ public final class ShopGui extends SimpleGui {
 			if (blackMarketSelected) bm.glow();
 			setSlot(ShopRouter.BLACK_MARKET_SLOT, bm);
 		}
-		setSlot(ShopRouter.BALANCE_SLOT, new GuiElementBuilder(Items.GOLD_INGOT)
+		GuiElementBuilder balance = new GuiElementBuilder(Items.GOLD_INGOT)
 			.setName(plain("Balance: " + eco.balance(id), ChatFormatting.YELLOW))
 			.addLoreLine(Component.literal("Click an item to buy 1").withStyle(ChatFormatting.GRAY))
 			.addLoreLine(Component.literal("Shift-click to buy a stack").withStyle(ChatFormatting.GRAY))
-			.addLoreLine(Component.literal("Click your own items to sell").withStyle(ChatFormatting.GRAY)));
+			.addLoreLine(Component.literal("Click your own items to sell").withStyle(ChatFormatting.GRAY));
+		if (!blackMarketSelected && pages > 1) {
+			balance.addLoreLine(Component.literal("Page " + (page + 1) + "/" + pages).withStyle(ChatFormatting.GRAY));
+		}
+		setSlot(ShopRouter.BALANCE_SLOT, balance);
 		setSlot(ShopRouter.CLOSE_SLOT, new GuiElementBuilder(Items.BARRIER).setName(plain("Close", ChatFormatting.RED)));
 
 		if (blackMarketSelected) {
@@ -175,7 +196,9 @@ public final class ShopGui extends SimpleGui {
 			}
 			return;
 		}
-		List<ShopConfig.Item> shown = visibleItems(cfg, eco);
+		if (page > 0) setSlot(ShopRouter.PREV_PAGE_SLOT, pageButton("Previous page", page, pages));
+		if (page < pages - 1) setSlot(ShopRouter.NEXT_PAGE_SLOT, pageButton("Next page", page, pages));
+		List<ShopConfig.Item> shown = pageItems(all);
 		for (int i = 0; i < shown.size(); i++) {
 			ShopConfig.Item it = shown.get(i);
 			Item item = resolve(it.id()).orElse(Items.BARRIER);
@@ -228,14 +251,30 @@ public final class ShopGui extends SimpleGui {
 		if (fresh) svc.save();
 		boolean bmShown = !offers(svc, eco.day()).isEmpty();
 		if (!bmShown) blackMarketSelected = false;
+		int itemCount = tierItems(cfg, eco).size();
+		int pages = ShopRouter.pageCount(itemCount);
+		if (page != ShopRouter.clampPage(page, itemCount)) {
+			// The tier shrank under the open menu: the shown page is stale, so redraw and ignore this click.
+			refresh();
+			return;
+		}
 		Action act = ShopRouter.route(index, kind, t -> t < cfg.tiers().size() && eco.isUnlocked(id, cfg.tiers().get(t).id()),
-			bmShown, blackMarketSelected);
+			bmShown, blackMarketSelected, page > 0, page < pages - 1);
 		switch (act.type()) {
 			case NONE -> { }
 			case CLOSE -> close();
 			case SELECT_TAB -> {
 				selectedTab = act.index();
 				blackMarketSelected = false;
+				page = 0;
+				refresh();
+			}
+			case PREV_PAGE -> {
+				page = ShopRouter.clampPage(page - 1, itemCount);
+				refresh();
+			}
+			case NEXT_PAGE -> {
+				page = ShopRouter.clampPage(page + 1, itemCount);
 				refresh();
 			}
 			case SELECT_BLACK_MARKET -> {
@@ -249,6 +288,7 @@ public final class ShopGui extends SimpleGui {
 				if (r.ok()) {
 					selectedTab = act.index();
 					blackMarketSelected = false;
+					page = 0;
 					svc.save();
 					ok();
 				} else {
@@ -266,9 +306,12 @@ public final class ShopGui extends SimpleGui {
 	private void buy(ShopService svc, int itemIndex, boolean stack) {
 		ShopConfig cfg = svc.config();
 		Economy eco = svc.economy();
-		List<ShopConfig.Item> shown = visibleItems(cfg, eco);
-		if (itemIndex >= shown.size()) return;
-		ShopConfig.Item it = shown.get(itemIndex);
+		// Map the in-page index to the absolute index and re-check it against the live config.
+		List<ShopConfig.Item> all = tierItems(cfg, eco);
+		if (itemIndex < 0 || itemIndex >= ShopRouter.PAGE_SIZE) return;
+		long abs = (long) page * ShopRouter.PAGE_SIZE + itemIndex;
+		if (abs >= all.size()) return;
+		ShopConfig.Item it = all.get((int) abs);
 		Item item = resolve(it.id()).orElse(null);
 		if (item == null) return;
 

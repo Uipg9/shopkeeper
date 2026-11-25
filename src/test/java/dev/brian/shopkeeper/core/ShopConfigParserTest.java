@@ -46,12 +46,24 @@ class ShopConfigParserTest {
 	}
 
 	@Test
-	void unsellableWhenSellRoundsOutOfRange() {
+	void onlyBuyOneIsUnsellable() {
 		var r = ShopConfigParser.parse(json("0.3", TIERS, "[{\"id\":\"a:cheap\",\"tier\":\"basics\",\"buy\":1}]"));
 		assertTrue(r.ok());
 		var it = r.config().item("a:cheap");
 		assertFalse(it.sellable());
 		assertEquals(0, it.sell());
+	}
+
+	@Test
+	void cheapItemsSellForAtLeastOne() {
+		var r = ShopConfigParser.parse(json("0.25", TIERS, "[{\"id\":\"a:two\",\"tier\":\"basics\",\"buy\":2},"
+				+ "{\"id\":\"a:three\",\"tier\":\"basics\",\"buy\":3},{\"id\":\"a:four\",\"tier\":\"basics\",\"buy\":4}]"));
+		assertTrue(r.ok(), r.errors().toString());
+		for (String id : new String[] {"a:two", "a:three", "a:four"}) {
+			var it = r.config().item(id);
+			assertTrue(it.sellable(), id);
+			assertEquals(1, it.sell(), id);
+		}
 	}
 
 	@Test
@@ -73,16 +85,16 @@ class ShopConfigParserTest {
 	}
 
 	@Test
-	void maxFortyFiveItemsPerTier() {
+	void max450ItemsPerTier() {
 		StringBuilder sb = new StringBuilder("[");
-		for (int i = 0; i < 46; i++) {
+		for (int i = 0; i < 451; i++) {
 			if (i > 0) sb.append(',');
 			sb.append("{\"id\":\"a:i").append(i).append("\",\"tier\":\"basics\",\"buy\":10}");
 		}
-		String items46 = sb.append(']').toString();
-		assertError(ShopConfigParser.parse(json("0.3", TIERS, items46)), "45");
-		String items45 = items46.substring(0, items46.lastIndexOf(",{")) + "]";
-		assertTrue(ShopConfigParser.parse(json("0.3", TIERS, items45)).ok());
+		String items451 = sb.append(']').toString();
+		assertError(ShopConfigParser.parse(json("0.3", TIERS, items451)), "tier 'basics' has more than 450 items");
+		String items450 = items451.substring(0, items451.lastIndexOf(",{")) + "]";
+		assertTrue(ShopConfigParser.parse(json("0.3", TIERS, items450)).ok());
 	}
 
 	@Test

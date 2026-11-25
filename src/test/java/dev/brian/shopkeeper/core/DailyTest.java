@@ -49,6 +49,36 @@ class DailyTest {
 	}
 
 	@Test
+	void defaultSellRuleMakesEverythingAboveOneSellable() {
+		for (double f : new double[] {ShopConfig.MIN_SELL_FRACTION, 0.3, ShopConfig.MAX_SELL_FRACTION}) {
+			assertFalse(ShopConfig.makeItem("a:one", "t", 1, null, null, f).sellable());
+			for (long buy = 2; buy <= 2000; buy++) {
+				var it = ShopConfig.makeItem("a:x", "t", buy, null, null, f);
+				assertTrue(it.sellable(), buy + " @ " + f);
+				assertEquals(Math.max(1, (long) Math.floor(buy * f)), it.sell(), buy + " @ " + f);
+				assertTrue(it.sell() >= 1 && it.sell() < buy);
+				// Daily deals never allow profit: hot sell < buy, cheap buy > sell.
+				assertTrue(Daily.hotSell(it) >= it.sell() && Daily.hotSell(it) < buy);
+				assertTrue(Daily.cheapBuy(it) > Daily.hotSell(it) && Daily.cheapBuy(it) <= buy);
+			}
+		}
+		var two = ShopConfig.makeItem("a:two", "t", 2, null, null, 0.3);
+		assertEquals(1, Daily.hotSell(two));
+		assertEquals(2, Daily.cheapBuy(two));
+		var three = ShopConfig.makeItem("a:three", "t", 3, null, null, 0.3);
+		assertEquals(1, Daily.hotSell(three));
+		assertEquals(3, Daily.cheapBuy(three));
+	}
+
+	@Test
+	void explicitSellStillRespected() {
+		assertEquals(7, ShopConfig.makeItem("a:x", "t", 10, 7L, null, 0.3).sell());
+		// explicit 0 is a deliberate opt-out; explicit >= buy can never be sellable
+		assertFalse(ShopConfig.makeItem("a:x", "t", 10, 0L, null, 0.3).sellable());
+		assertFalse(ShopConfig.makeItem("a:x", "t", 10, 10L, null, 0.3).sellable());
+	}
+
+	@Test
 	void invariantsOverManyDays() throws Exception {
 		var cfg = defaults();
 		for (long seed : new long[] {0, 1, -99, 123456789L}) {

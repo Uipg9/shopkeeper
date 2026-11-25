@@ -250,8 +250,8 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 			expect(inventory().equals(inv), step + ": inventory changed from " + inv + " to " + inventory());
 		}
 
-		/** Everything the test needs to know about one deal item, read on the server thread. */
-		private record DealItem(String id, String tier, int tierIndex, long buy, long sell, long buyNow, long sellNow, boolean sellable) {}
+		/** Everything the test needs to know about one deal item, read on the server thread. pos: index in its tier list. */
+		private record DealItem(String id, String tier, int tierIndex, int pos, long buy, long sell, long buyNow, long sellNow, boolean sellable) {}
 
 		private DealItem dealItem(String id) {
 			return world.getServer().computeOnServer(server -> {
@@ -261,18 +261,44 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 				for (int i = 0; i < svc.config().tiers().size(); i++) {
 					if (svc.config().tiers().get(i).id().equals(it.tier())) ti = i;
 				}
+				int pos = svc.config().itemsIn(it.tier()).indexOf(it);
 				var eco = svc.economy();
-				return new DealItem(id, it.tier(), ti, it.buy(), it.sell(), eco.buyPrice(it), eco.sellPrice(it), it.sellable());
+				return new DealItem(id, it.tier(), ti, pos, it.buy(), it.sell(), eco.buyPrice(it), eco.sellPrice(it), it.sellable());
 			});
 		}
 
-		/** Menu index (shop area, 9..53) of the slot showing this item, or -1. */
-		private int shopSlot(String id) {
-			return context.computeOnClient(mc -> {
-				AbstractContainerMenu m = mc.player.containerMenu;
-				for (int i = 9; i < 54; i++) if (isItem(m.slots.get(i).getItem(), id)) return i;
-				return -1;
-			});
+		/** Not listed in the shop config, so never sellable. */
+		private static final String NOT_IN_SHOP = "minecraft:bedrock";
+		/** Listed (deep tier) but damaged, so refused as a modified stack. */
+		private static final String DAMAGED_SWORD = "minecraft:diamond_sword[minecraft:damage=10]";
+
+		private static final int PAGE = 45;
+		private static final int PREV_SLOT = 5;
+		private static final int NEXT_SLOT = 7;
+
+		/** Item ids of a tier in config (= menu) order. */
+		private java.util.List<String> tierIds(String tier) {
+			return world.getServer().computeOnServer(server -> ShopService.get().config().itemsIn(tier).stream()
+				.map(dev.brian.shopkeeper.core.ShopConfig.Item::id).toList());
+		}
+
+		/** The page arrow in this slot, if shown, has this name. */
+		private boolean arrow(int slot, String name) {
+			ItemStack st = clientSlot(slot);
+			return isItem(st, "minecraft:arrow") && st.getHoverName().getString().equals(name);
+		}
+
+		/**
+		 * Menu index of the slot showing a deal item, after paging to it from page 1 of its (freshly selected) tab:
+		 * clicks Next page pos/45 times. -1 if the item is not where its tier index says.
+		 */
+		private int shopSlot(DealItem d) {
+			for (int p = 0; p < d.pos() / PAGE; p++) {
+				expect(arrow(NEXT_SLOT, "Next page"), "no Next page arrow while paging to " + d.id() + " (page " + (p + 1) + ")");
+				click(NEXT_SLOT);
+			}
+			int slot = 9 + d.pos() % PAGE;
+			return isItem(clientSlot(slot), d.id()) ? slot : -1;
 		}
 
 		private String lore(int menuIndex) {
@@ -318,7 +344,7 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 			boolean cheapUi = unlocked(cheap.tier()) && cheap.tierIndex() >= 0;
 			if (cheapUi) {
 				click(cheap.tierIndex());
-				int slot = shopSlot(cheap.id());
+				int slot = shopSlot(cheap);
 				expect(slot >= 9, "cheap item " + cheap.id() + " not shown in its unlocked tab");
 				String lore = lore(slot);
 				expect(lore.contains("SALE") && lore.contains("buy for " + cheap.buyNow()) && lore.contains("Buy: " + cheap.buyNow()),
@@ -333,7 +359,7 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 			}
 			if (hotUi) {
 				click(hot.tierIndex());
-				int slot = shopSlot(hot.id());
+				int slot = shopSlot(hot);
 				expect(slot >= 9, "hot item " + hot.id() + " not shown in its unlocked tab");
 				String lore = lore(slot);
 				expect(lore.contains("HOT") && lore.contains("sells for " + hot.sellNow()) && lore.contains("Sell: " + hot.sellNow()),
@@ -584,6 +610,227 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 			pass("B2 next-day report delivered once: " + auto);
 		}
 
+		/** Adds coins on the server thread (refund), so later buys can't fail on balance. */
+		private long fund(long bal, long amount) {
+			world.getServer().computeOnServer(server -> {
+				ShopService.get().economy().refund(server.getPlayerList().getPlayers().getFirst().getUUID(), amount);
+				return null;
+			});
+			bal += amount;
+			expect(balance() == bal, "fund bookkeeping: " + balance() + " vs " + bal);
+			return bal;
+		}
+
+		/** Today's effective buy price of a config item. */
+		private long buyNow(String id) {
+			return world.getServer().computeOnServer(server -> ShopService.get().economy().buyPrice(ShopService.get().config().item(id)));
+		}
+
+		/** Today's effective sell price of a config item. */
+		private long sellNow(String id) {
+			return world.getServer().computeOnServer(server -> ShopService.get().economy().sellPrice(ShopService.get().config().item(id)));
+		}
+
+		/** Chat lines received since the chat had {@code seen} lines (newest first). */
+		private java.util.List<String> newChat(int seen) {
+			var now = chatLines();
+			return now.subList(0, Math.max(0, now.size() - seen));
+		}
+
+		private void expectChat(int seen, String fragment, String step) {
+			var lines = newChat(seen);
+			boolean found = lines.stream().anyMatch(l -> l.contains(fragment));
+			expect(found, step + ": no chat line containing '" + fragment + "'; new chat: " + lines);
+		}
+
+		/** Basics has several pages of 45: arrows at slots 5/7, absolute index mapping, page reset on tab switch. */
+		private long paging(long bal) {
+			java.util.List<String> basics = tierIds("basics");
+			java.util.List<String> under = tierIds("underground");
+			int pages = (basics.size() + PAGE - 1) / PAGE;
+			expect(pages >= 3, "basics has only " + basics.size() + " items; the paging scenario needs 3+ pages");
+
+			click(0);
+			expect(isItem(clientSlot(9), basics.get(0)), "page 1 slot 9 shows " + clientSlot(9) + ", expected " + basics.get(0));
+			expect(arrow(NEXT_SLOT, "Next page"), "page 1: slot 7 is not a Next page arrow: " + clientSlot(NEXT_SLOT));
+			expect(clientSlot(PREV_SLOT).isEmpty(), "page 1: slot 5 should be empty, shows " + clientSlot(PREV_SLOT));
+			expect(lore(4).contains("Page 1/" + pages), "balance lore has no 'Page 1/" + pages + "': " + lore(4));
+			pass("P1 Basics page 1: Next arrow at slot 7, no Previous at slot 5, " + pages + " pages");
+
+			click(NEXT_SLOT);
+			expect(isItem(clientSlot(9), basics.get(PAGE)), "page 2 slot 9 shows " + clientSlot(9) + ", expected " + basics.get(PAGE));
+			expect(arrow(PREV_SLOT, "Previous page") && arrow(NEXT_SLOT, "Next page"),
+				"page 2 arrows wrong: slot 5 " + clientSlot(PREV_SLOT) + ", slot 7 " + clientSlot(NEXT_SLOT));
+			expect(lore(4).contains("Page 2/" + pages), "balance lore has no 'Page 2/" + pages + "': " + lore(4));
+			moveCursorAway();
+			context.takeScreenshot("shop_page_2");
+			pass("P2 Next page: slot 9 shows item #46 " + basics.get(PAGE) + ", both arrows shown");
+
+			// Buy on page 2: slot 10 is in-page index 1 = absolute index 46.
+			bal = fund(bal, 2000);
+			String id = basics.get(PAGE + 1);
+			long price = buyNow(id);
+			int before = count(id);
+			click(10);
+			expect(count(id) == before + 1, "page 2 buy of " + id + " delivered " + (count(id) - before));
+			expect(balance() == bal - price, "page 2 buy of " + id + " charged " + (bal - balance()) + ", expected " + price);
+			bal -= price;
+			expect(isItem(clientSlot(9), basics.get(PAGE)), "a buy on page 2 left page 2: slot 9 " + clientSlot(9));
+			pass("P3 buy on page 2: " + id + " (absolute index " + (PAGE + 1) + ") charged exactly " + price);
+
+			for (int p = 2; p < pages; p++) click(NEXT_SLOT);
+			int lastFirst = (pages - 1) * PAGE;
+			int lastCount = basics.size() - lastFirst;
+			expect(isItem(clientSlot(9), basics.get(lastFirst)), "last page slot 9 shows " + clientSlot(9) + ", expected " + basics.get(lastFirst));
+			expect(clientSlot(NEXT_SLOT).isEmpty(), "last page: Next arrow still shown: " + clientSlot(NEXT_SLOT));
+			expect(arrow(PREV_SLOT, "Previous page"), "last page: no Previous arrow: " + clientSlot(PREV_SLOT));
+			if (lastCount < PAGE) expect(clientSlot(9 + lastCount).isEmpty(), "last page: slot after the last item shows " + clientSlot(9 + lastCount));
+			moveCursorAway();
+			context.takeScreenshot("shop_page_last");
+			Map<String, Integer> inv = inventory();
+			click(NEXT_SLOT);
+			if (lastCount < PAGE) click(9 + lastCount);
+			assertUnchanged("click hidden Next arrow / empty slot on the last page", bal, inv);
+			expect(isItem(clientSlot(9), basics.get(lastFirst)), "hidden Next click changed the page: slot 9 " + clientSlot(9));
+			pass("P4 last page " + pages + ": Next hidden, Previous shown; hidden arrow and empty slot do nothing");
+
+			click(PREV_SLOT);
+			int prevFirst = (pages - 2) * PAGE;
+			expect(isItem(clientSlot(9), basics.get(prevFirst)), "Previous page: slot 9 shows " + clientSlot(9) + ", expected " + basics.get(prevFirst));
+			expect(arrow(NEXT_SLOT, "Next page"), "Previous page: Next arrow missing again");
+			pass("P5 Previous page goes back to page " + (pages - 1));
+
+			click(1);
+			expect(isItem(clientSlot(9), under.get(0)), "tab switch: Underground slot 9 shows " + clientSlot(9) + ", expected " + under.get(0));
+			expect(clientSlot(PREV_SLOT).isEmpty(), "tab switch did not reset to page 1: slot 5 " + clientSlot(PREV_SLOT));
+			expect(arrow(NEXT_SLOT, "Next page") == (under.size() > PAGE), "Underground Next arrow vs " + under.size() + " items: " + clientSlot(NEXT_SLOT));
+			if (under.size() > PAGE) click(NEXT_SLOT);
+			click(0);
+			expect(isItem(clientSlot(9), basics.get(0)) && clientSlot(PREV_SLOT).isEmpty(),
+				"back to Basics did not reset to page 1: slot 9 " + clientSlot(9) + ", slot 5 " + clientSlot(PREV_SLOT));
+			expect(balance() == bal, "paging scenario bookkeeping: " + balance() + " vs " + bal);
+			pass("P6 switching tabs resets to page 1 (Underground and back to Basics)");
+			return bal;
+		}
+
+		/** Top-level /sell, /sell all, /buy through the real chat box. */
+		private long commands(long bal) {
+			world.getServer().runCommand("clear @p");
+			world.getServer().computeOnServer(server -> {
+				server.getPlayerList().getPlayers().getFirst().getInventory().setSelectedSlot(0);
+				return null;
+			});
+			context.waitTicks(4);
+			bal = balance();
+			bal = fund(bal, 2000);
+
+			// /sell: whole stack in the main hand.
+			give("minecraft:potato 12");
+			long potato = sellNow("minecraft:potato");
+			int seen = chatLines().size();
+			chatCommand("sell");
+			expect(count("minecraft:potato") == 0, "/sell: potatoes left " + count("minecraft:potato"));
+			expect(balance() == bal + 12 * potato, "/sell credited " + (balance() - bal) + ", expected " + 12 * potato);
+			bal += 12 * potato;
+			expectChat(seen, "Sold 12 x Potato for " + 12 * potato + " coins.", "/sell");
+			pass("C1 /sell sold the 12 potatoes in hand for " + 12 * potato);
+
+			// /sell all: sells listed unmodified stacks, skips bedrock (unlisted) and the damaged sword.
+			give("minecraft:stone 6");
+			give("minecraft:baked_potato 4");
+			give(NOT_IN_SHOP + " 2");
+			give(DAMAGED_SWORD);
+			long credit = 6 * sellNow("minecraft:stone") + 4 * sellNow("minecraft:baked_potato");
+			seen = chatLines().size();
+			chatCommand("sell all");
+			expect(count("minecraft:stone") == 0 && count("minecraft:baked_potato") == 0, "/sell all left sellable stacks: " + inventory());
+			expect(count(NOT_IN_SHOP) == 2 && count("minecraft:diamond_sword") == 1, "/sell all touched unsellable stacks: " + inventory());
+			expect(balance() == bal + credit, "/sell all credited " + (balance() - bal) + ", expected " + credit);
+			bal += credit;
+			expectChat(seen, "Sold 10 items for " + credit + " coins (skipped 2 stacks).", "/sell all");
+			pass("C2 /sell all sold 10 items for " + credit + ", skipped bedrock and the damaged sword");
+
+			// /buy oak_log 10
+			long oak = buyNow("minecraft:oak_log");
+			int logs = count("minecraft:oak_log");
+			seen = chatLines().size();
+			chatCommand("buy oak_log 10");
+			expect(count("minecraft:oak_log") == logs + 10, "/buy oak_log 10 delivered " + (count("minecraft:oak_log") - logs));
+			expect(balance() == bal - 10 * oak, "/buy oak_log 10 charged " + (bal - balance()) + ", expected " + 10 * oak);
+			bal -= 10 * oak;
+			expectChat(seen, "Bought 10 x Oak Log for " + 10 * oak + " coins.", "/buy oak_log 10");
+			context.takeScreenshot("shop_buy_command");
+			pass("C3 /buy oak_log 10: +10 logs, charged " + 10 * oak);
+
+			// /buy "iron ingot" 3 (Underground, unlocked in step 4)
+			Map<String, Integer> inv = inventory();
+			seen = chatLines().size();
+			chatCommand("buy \"iron ingot\" 3");
+			if (unlocked("underground")) {
+				long iron = buyNow("minecraft:iron_ingot");
+				expect(count("minecraft:iron_ingot") == inv.getOrDefault("minecraft:iron_ingot", 0) + 3, "/buy iron ingot 3 delivered wrong: " + inventory());
+				expect(balance() == bal - 3 * iron, "/buy iron ingot 3 charged " + (bal - balance()) + ", expected " + 3 * iron);
+				bal -= 3 * iron;
+				expectChat(seen, "Bought 3 x Iron Ingot for " + 3 * iron + " coins.", "/buy \"iron ingot\" 3");
+				pass("C4 /buy \"iron ingot\" 3: +3, charged " + 3 * iron);
+			} else {
+				assertUnchanged("/buy iron ingot in a locked tier", bal, inv);
+				expectChat(seen, "unlock it in /shop first", "/buy \"iron ingot\" 3 (locked)");
+				pass("C4 /buy \"iron ingot\" 3 refused: Underground locked");
+			}
+
+			// A locked tier (if any is left): refused, nothing charged.
+			String[] locked = world.getServer().computeOnServer(server -> {
+				UUID uid = server.getPlayerList().getPlayers().getFirst().getUUID();
+				var cfg = ShopService.get().config();
+				for (var t : cfg.tiers()) {
+					if (!ShopService.get().economy().isUnlocked(uid, t.id()) && !cfg.itemsIn(t.id()).isEmpty()) {
+						return new String[] { cfg.itemsIn(t.id()).getFirst().id(), t.name() };
+					}
+				}
+				return null;
+			});
+			if (locked != null) {
+				inv = inventory();
+				seen = chatLines().size();
+				chatCommand("buy \"" + locked[0] + "\" 1");
+				assertUnchanged("/buy from the locked " + locked[1] + " tier", bal, inv);
+				expectChat(seen, "is in the " + locked[1] + " tier - unlock it in /shop first.", "/buy locked tier");
+				pass("C5 /buy " + locked[0] + " refused: " + locked[1] + " tier locked");
+			} else {
+				System.out.println("[shopkeeper-test] NOTE every tier is unlocked; /buy locked-tier check skipped");
+			}
+
+			// Out-of-range quantity: rejected by the argument (max 2304) before anything runs.
+			inv = inventory();
+			chatCommand("buy dirt 99999");
+			assertUnchanged("/buy dirt 99999", bal, inv);
+			pass("C6 /buy dirt 99999 rejected by the quantity range, nothing changed");
+
+			// Ambiguous name.
+			seen = chatLines().size();
+			chatCommand("buy oak");
+			assertUnchanged("/buy oak (ambiguous)", bal, inv);
+			expectChat(seen, "'oak' is ambiguous", "/buy oak");
+			pass("C7 /buy oak is ambiguous, nothing charged");
+
+			// Unaffordable: drain the balance to 5 on the server thread, then try 10 oak logs.
+			long drain = bal - 5;
+			world.getServer().computeOnServer(server -> {
+				var r = ShopService.get().economy().spend(server.getPlayerList().getPlayers().getFirst().getUUID(), drain);
+				expect(r.ok(), "test drain failed: " + r.error());
+				return null;
+			});
+			bal = 5;
+			expect(balance() == bal, "drain bookkeeping: " + balance());
+			seen = chatLines().size();
+			chatCommand("buy oak_log 10");
+			assertUnchanged("/buy oak_log 10 with 5 coins", bal, inv);
+			expectChat(seen, "Not enough coins: 10 x Oak Log costs " + 10 * oak + ", you have 5.", "/buy unaffordable");
+			pass("C8 /buy oak_log 10 with 5 coins refused, nothing charged");
+			return bal;
+		}
+
 		void execute() {
 			// 6. Registry check first so a bad id is reported even if clicks later fail.
 			java.util.List<String> unknown = world.getServer().computeOnServer(server -> ShopService.get().unknownItemIds());
@@ -660,17 +907,25 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 
 			// 5. Exploit probes on the Basics tab. Nothing may be duplicated, lost, or credited.
 			click(0); // back to Basics
+			// Since buy>=2 items sell by default, "unsellable" means: not in the config (bedrock) or modified (damaged sword).
+			boolean bedrockListed = world.getServer().computeOnServer(server -> ShopService.get().config().item(NOT_IN_SHOP) != null);
+			expect(!bedrockListed, NOT_IN_SHOP + " is in the shop config; pick another not-for-sale item for the probes");
 			give("minecraft:stone 10");
-			give("minecraft:diamond_sword");
+			give(NOT_IN_SHOP);
+			give(DAMAGED_SWORD);
 			give("minecraft:potato[minecraft:custom_name=\"Fancy\"] 3");
 			inv = inventory();
 			expect(inv.getOrDefault("minecraft:potato", 0) == 3, "named potato give failed: " + inv);
 			int stone = playerSlot(st -> isItem(st, "minecraft:stone"), "stone");
-			int sword = playerSlot(st -> isItem(st, "minecraft:diamond_sword"), "diamond sword");
+			int sword = playerSlot(st -> isItem(st, NOT_IN_SHOP), "bedrock");
+			int damaged = playerSlot(st -> isItem(st, "minecraft:diamond_sword"), "damaged diamond sword");
 			int named = playerSlot(st -> isItem(st, "minecraft:potato"), "named potato");
 
 			shiftClick(sword);
-			assertUnchanged("shift-click an unsellable item", bal, inv);
+			assertUnchanged("shift-click an item the shop does not list", bal, inv);
+			shiftClick(damaged);
+			click(damaged);
+			assertUnchanged("sell a damaged item", bal, inv);
 			shiftClick(named);
 			click(named);
 			assertUnchanged("sell an item with custom components", bal, inv);
@@ -691,7 +946,7 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 			assertUnchanged("raw swap/throw/clone packets", bal, inv);
 
 			// Drag across slots, via real mouse and via raw quick-craft packets. The press lands on the
-			// unsellable sword (a press on a sellable slot is a legitimate click and would sell one).
+			// unsellable bedrock (a press on a sellable slot is a legitimate click and would sell one).
 			hover(sword);
 			context.getInput().holdMouse(InputConstants.MOUSE_BUTTON_LEFT);
 			context.getInput().moveCursor(20, 0);
@@ -725,10 +980,11 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 			expect(balance() == bal + 5L * soldStone, "rapid clicks credited " + (balance() - bal) + " for " + soldStone + " stone");
 			bal += 5L * soldStone;
 			context.takeScreenshot("shop_after_probes");
-			pass("5 probes: swap, number key, drop, clone, drag, double-click, shift on unsellable/named: no dup, no loss, no credit");
+			pass("5 probes: swap, number key, drop, clone, drag, double-click, shift on unlisted/damaged/named: no dup, no loss, no credit");
 
 			bal = dailyDeals(bal);
 			bal = blackMarket(bal);
+			bal = paging(bal);
 
 			// 7. Close with the Close button.
 			click(8);
@@ -748,8 +1004,9 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 			});
 			context.waitTicks(4);
 			give("minecraft:potato 20");
-			give("minecraft:diamond_sword");
-			give("minecraft:diamond_sword 1");
+			give(DAMAGED_SWORD);
+			give(DAMAGED_SWORD);
+			give(NOT_IN_SHOP + " 2");
 			give("minecraft:potato[minecraft:custom_name=\"Fancy\"] 3");
 			give("minecraft:stone 10");
 			give("minecraft:baked_potato 5");
@@ -762,7 +1019,8 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 
 			chatCommand("shop sellall");
 			expect(count("minecraft:potato") == 3, "/shop sellall sold the renamed potatoes");
-			expect(count("minecraft:diamond_sword") == 2, "/shop sellall touched unsellable swords");
+			expect(count("minecraft:diamond_sword") == 2, "/shop sellall touched the damaged swords");
+			expect(count(NOT_IN_SHOP) == 2, "/shop sellall touched the unlisted bedrock");
 			expect(count("minecraft:stone") == 0 && count("minecraft:baked_potato") == 0,
 				"/shop sellall left sellable stacks: " + inventory());
 			long base = 5L * 10 + 7L * 5;
@@ -770,7 +1028,10 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 			expect(balance() >= bal + sums, "/shop sellall credited " + (balance() - bal) + ", expected >= " + sums);
 			bal = balance();
 			finalBalance = bal;
-			pass("8b /shop sellall sold stone + baked potatoes, skipped renamed potatoes and swords (balance " + bal + ")");
+			pass("8b /shop sellall sold stone + baked potatoes, skipped renamed potatoes, damaged swords, bedrock (balance " + bal + ")");
+
+			bal = commands(bal);
+			finalBalance = bal;
 
 			dailyReport();
 			expect(balance() == finalBalance, "daily report scenario changed the balance: " + balance() + " vs " + finalBalance);

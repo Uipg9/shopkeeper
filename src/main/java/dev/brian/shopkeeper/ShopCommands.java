@@ -1,6 +1,8 @@
 package dev.brian.shopkeeper;
 
 import com.mojang.brigadier.Command;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import dev.brian.shopkeeper.core.SellPlan;
 
@@ -20,7 +22,18 @@ public final class ShopCommands {
 	private ShopCommands() {}
 
 	public static void register() {
-		CommandRegistrationCallback.EVENT.register((dispatcher, context, selection) ->
+		CommandRegistrationCallback.EVENT.register((dispatcher, context, selection) -> {
+			dispatcher.register(Commands.literal("sell")
+				.executes(ctx -> sellHand(ctx.getSource()))
+				.then(Commands.literal("all").executes(ctx -> sellAll(ctx.getSource()))));
+			// String (not word) so quoted "minecraft:diamond" or "iron ingot" also parse.
+			dispatcher.register(Commands.literal("buy")
+				.then(Commands.argument("item", StringArgumentType.string())
+					.suggests((ctx, b) -> ShopBuy.suggest(ctx.getSource(), b))
+					.executes(ctx -> ShopBuy.buy(ctx.getSource(), StringArgumentType.getString(ctx, "item"), 1))
+					.then(Commands.argument("quantity", IntegerArgumentType.integer(1, ShopBuy.MAX_QUANTITY))
+						.executes(ctx -> ShopBuy.buy(ctx.getSource(), StringArgumentType.getString(ctx, "item"),
+							IntegerArgumentType.getInteger(ctx, "quantity"))))));
 			dispatcher.register(Commands.literal("shop")
 				.executes(ctx -> {
 					ServerPlayer p = ctx.getSource().getPlayerOrException();
@@ -50,7 +63,8 @@ public final class ShopCommands {
 				.then(Commands.literal("sellall").executes(ctx -> sellAll(ctx.getSource())))
 				.then(Commands.literal("reload")
 					.requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
-					.executes(ctx -> reload(ctx.getSource())))));
+					.executes(ctx -> reload(ctx.getSource()))));
+		});
 	}
 
 	private static int report(CommandSourceStack source) throws CommandSyntaxException {
@@ -76,7 +90,7 @@ public final class ShopCommands {
 		}
 		svc.refreshDeal();
 		svc.economy().ensurePlayer(p.getUUID());
-		ShopSell.Outcome o =ShopSell.sellSlot(svc, p, p.getInventory().getSelectedSlot());
+		ShopSell.Outcome o = ShopSell.sellSlot(svc, p, p.getInventory().getSelectedSlot());
 		if (!o.ok()) {
 			source.sendFailure(Component.literal(o.error()));
 			return 0;

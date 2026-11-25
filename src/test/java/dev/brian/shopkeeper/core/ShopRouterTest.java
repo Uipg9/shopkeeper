@@ -110,4 +110,63 @@ class ShopRouterTest {
 			for (int s : new int[] {-1, 90, Integer.MAX_VALUE, Integer.MIN_VALUE}) assertEquals(Action.NONE, route(s, k, ALL, true, true));
 		}
 	}
+
+	@Test
+	void pageButtonsLeftOnlyAndOnlyWhenVisible() {
+		for (ClickKind k : ClickKind.values()) {
+			for (boolean prev : new boolean[] {false, true}) {
+				for (boolean next : new boolean[] {false, true}) {
+					for (boolean bmShown : new boolean[] {false, true}) {
+						Action p = route(PREV_PAGE_SLOT, k, ALL, bmShown, false, prev, next);
+						Action n = route(NEXT_PAGE_SLOT, k, ALL, bmShown, false, prev, next);
+						String ctx = k + " prev=" + prev + " next=" + next + " bm=" + bmShown;
+						assertEquals(prev && k == ClickKind.LEFT ? new Action(Type.PREV_PAGE, -1) : Action.NONE, p, ctx);
+						assertEquals(next && k == ClickKind.LEFT ? new Action(Type.NEXT_PAGE, -1) : Action.NONE, n, ctx);
+						// Black Market view: page slots are empty and never act.
+						assertEquals(Action.NONE, route(PREV_PAGE_SLOT, k, ALL, true, true, prev, next), ctx);
+						assertEquals(Action.NONE, route(NEXT_PAGE_SLOT, k, ALL, true, true, prev, next), ctx);
+					}
+				}
+			}
+		}
+	}
+
+	@Test
+	void pageSlotsAreFiveAndSeven() {
+		assertEquals(5, PREV_PAGE_SLOT);
+		assertEquals(7, NEXT_PAGE_SLOT);
+		assertEquals(45, PAGE_SIZE);
+		assertEquals(PAGE_SIZE, ITEM_END - ITEM_START);
+	}
+
+	@Test
+	void pageFlagsDoNotChangeOtherRegions() {
+		for (ClickKind k : ClickKind.values()) {
+			for (boolean sel : new boolean[] {false, true}) {
+				for (int s : new int[] {-1, 0, 1, 2, 3, 4, 6, 8, 9, 30, 53, 54, 70, 89, 90, Integer.MAX_VALUE, Integer.MIN_VALUE}) {
+					Action base = route(s, k, ALL, true, sel);
+					assertEquals(base, route(s, k, ALL, true, sel, true, true), s + " " + k);
+					assertEquals(base, route(s, k, ALL, true, sel, false, false), s + " " + k);
+				}
+			}
+		}
+		// The short overloads never show page buttons.
+		for (ClickKind k : ClickKind.values()) {
+			assertEquals(Action.NONE, route(5, k, ALL));
+			assertEquals(Action.NONE, route(7, k, ALL, true, false));
+		}
+	}
+
+	@Test
+	void pageCountAndClamp() {
+		assertEquals(1, pageCount(0));
+		assertEquals(1, pageCount(1));
+		assertEquals(1, pageCount(45));
+		assertEquals(2, pageCount(46));
+		assertEquals(10, pageCount(450));
+		assertEquals(0, clampPage(-3, 100));
+		assertEquals(2, clampPage(2, 100));
+		assertEquals(2, clampPage(9, 100));
+		assertEquals(0, clampPage(5, 0));
+	}
 }
