@@ -161,8 +161,40 @@ public final class ShopConfigParser {
 			}
 		}
 
+		ShopConfig.BlackMarketSettings bm = parseBlackMarket(root, errors);
+
 		if (!errors.isEmpty()) return fail(errors);
-		return new Result(new ShopConfig(starting, fraction, tiers, items), List.of());
+		return new Result(new ShopConfig(starting, fraction, tiers, items, bm), List.of());
+	}
+
+	private static ShopConfig.BlackMarketSettings parseBlackMarket(JsonObject root, List<String> errors) {
+		JsonElement e = root.get("blackMarket");
+		if (e == null || e.isJsonNull()) return ShopConfig.BlackMarketSettings.DEFAULT;
+		if (!e.isJsonObject()) {
+			errors.add("'blackMarket' must be an object");
+			return null;
+		}
+		JsonObject o = e.getAsJsonObject();
+		boolean enabled = true;
+		JsonElement en = o.get("enabled");
+		if (en != null && !en.isJsonNull()) {
+			if (!en.isJsonPrimitive() || !en.getAsJsonPrimitive().isBoolean()) {
+				errors.add("blackMarket 'enabled' must be true or false");
+			} else {
+				enabled = en.getAsBoolean();
+			}
+		}
+		int slots = ShopConfig.BlackMarketSettings.DEFAULT.slots();
+		Long sl = longField(o, "slots", "blackMarket", errors, true, null);
+		if (sl != null) {
+			if (sl < ShopConfig.MIN_BLACK_MARKET_SLOTS || sl > ShopConfig.MAX_BLACK_MARKET_SLOTS) {
+				errors.add("blackMarket 'slots' must be between " + ShopConfig.MIN_BLACK_MARKET_SLOTS + " and "
+						+ ShopConfig.MAX_BLACK_MARKET_SLOTS);
+			} else {
+				slots = sl.intValue();
+			}
+		}
+		return new ShopConfig.BlackMarketSettings(enabled, slots);
 	}
 
 	private static JsonArray arrayField(JsonObject o, String key, List<String> errors) {

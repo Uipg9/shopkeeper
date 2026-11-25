@@ -353,6 +353,186 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 			return bal;
 		}
 
+		/** Today's black market offers, computed like ShopGui does (overworld clock day + world seed). */
+		private java.util.List<dev.brian.shopkeeper.core.BlackMarket.Offer> todaysOffers() {
+			return world.getServer().computeOnServer(server -> {
+				ShopService.get().refreshDeal();
+				var level = server.overworld();
+				return dev.brian.shopkeeper.core.BlackMarket.generate(level.getOverworldClockTime() / 24000L, level.getSeed(),
+					ShopService.get().config());
+			});
+		}
+
+		private static Map<String, Integer> enchantsOf(ItemStack st) {
+			Map<String, Integer> out = new HashMap<>();
+			var ench = st.get(DataComponents.ENCHANTMENTS);
+			if (ench == null) return out;
+			for (var e : ench.entrySet()) {
+				out.put(e.getKey().unwrapKey().map(k -> k.identifier().toString()).orElse("?"), e.getIntValue());
+			}
+			return out;
+		}
+
+		private static Map<String, Integer> enchantsOf(java.util.List<dev.brian.shopkeeper.core.BlackMarket.Ench> list) {
+			Map<String, Integer> out = new HashMap<>();
+			for (var e : list) out.put(e.enchantId(), e.level());
+			return out;
+		}
+
+		/** Server-side count of stacks of this item with exactly this damage and enchants. */
+		private int usedGearCount(String id, int damage, Map<String, Integer> enchants) {
+			return world.getServer().computeOnServer(server -> {
+				Inventory inv = server.getPlayerList().getPlayers().getFirst().getInventory();
+				int n = 0;
+				for (int i = 0; i < inv.getContainerSize(); i++) {
+					ItemStack st = inv.getItem(i);
+					if (isItem(st, id) && st.getDamageValue() == damage && enchantsOf(st).equals(enchants)) n += st.getCount();
+				}
+				return n;
+			});
+		}
+
+		private ItemStack clientSlot(int menuIndex) {
+			return context.computeOnClient(mc -> mc.player.containerMenu.slots.get(menuIndex).getItem().copy());
+		}
+
+		/** Text of every chat message the client has received, newest first (reads ChatComponent.allMessages reflectively). */
+		private java.util.List<String> chatLines() {
+			return context.computeOnClient(mc -> {
+				try {
+					Field f = net.minecraft.client.gui.components.ChatComponent.class.getDeclaredField("allMessages");
+					f.setAccessible(true);
+					java.util.List<?> all = (java.util.List<?>) f.get(mc.gui.hud.getChat());
+					java.util.List<String> out = new java.util.ArrayList<>();
+					for (Object o : all) out.add(((net.minecraft.client.multiplayer.chat.GuiMessage) o).content().getString());
+					return out;
+				} catch (ReflectiveOperationException e) {
+					throw new AssertionError(e);
+				}
+			});
+		}
+
+		private void moveCursorAway() {
+			context.getInput().setCursorPos(2, 2);
+			context.waitTicks(3);
+		}
+
+		private long blackMarket(long bal) {
+			var offers = todaysOffers();
+			expect(!offers.isEmpty(), "black market generated no offers");
+			var o = offers.get(0);
+			world.getServer().computeOnServer(server -> {
+				ShopService.get().economy().refund(server.getPlayerList().getPlayers().getFirst().getUUID(), 20000);
+				return null;
+			});
+			bal += 20000;
+			expect(balance() == bal, "black market refund bookkeeping: " + balance() + " vs " + bal);
+
+			click(6);
+			int slot = 9 + o.slot();
+			ItemStack shown = clientSlot(slot);
+			expect(isItem(shown, o.itemId()), "black market slot " + slot + " shows " + shown + ", expected " + o.itemId());
+			int damage = shown.getDamageValue();
+			expect(damage > 0, "black market offer is not damaged: " + damage);
+			expect(enchantsOf(shown).equals(enchantsOf(o.enchants())), "client enchants " + enchantsOf(shown) + " vs " + o.enchants());
+			if (!o.enchants().isEmpty()) {
+				var ench = shown.get(DataComponents.ENCHANTMENTS);
+				expect(ench != null && !ench.isEmpty(), "enchanted offer shows no ENCHANTMENTS component");
+			}
+			String lore = lore(slot);
+			expect(lore.contains("Price: " + o.price() + " coins"), "black market lore wrong: " + lore);
+			moveCursorAway();
+			context.takeScreenshot("shop_black_market");
+			hover(slot);
+			context.waitTicks(10);
+			context.takeScreenshot("shop_black_market_tooltip");
+			pass("A1 black market tab shows " + o.itemId() + " dmg " + damage + " ench " + o.enchants() + " price " + o.price());
+
+			// Buy it.
+			Map<String, Integer> want = enchantsOf(o.enchants());
+			int before = usedGearCount(o.itemId(), damage, want);
+			click(slot);
+			expect(balance() == bal - o.price(), "black market buy charged " + (bal - balance()) + ", expected " + o.price());
+			bal -= o.price();
+			int got = usedGearCount(o.itemId(), damage, want);
+			expect(got == before + 1, "black market buy delivered " + (got - before) + " matching stacks");
+			ItemStack after = clientSlot(slot);
+			expect(isItem(after, "minecraft:gray_stained_glass_pane") && after.getHoverName().getString().contains("Sold out"),
+				"sold slot shows " + after + " / " + after.getHoverName().getString());
+			moveCursorAway();
+			context.takeScreenshot("shop_black_market_sold");
+			pass("A2 black market buy: charged exactly " + o.price() + ", used gear delivered, slot shows Sold out");
+
+			// Second click on the sold slot: nothing.
+			Map<String, Integer> inv = inventory();
+			click(slot);
+			assertUnchanged("click a sold out black market slot", bal, inv);
+
+			// Selling the bought (modified) gear back must be refused.
+			click(playerSlot(st -> isItem(st, o.itemId()) && st.getDamageValue() == damage, "bought gear"));
+			assertUnchanged("sell back black market gear", bal, inv);
+			expect(usedGearCount(o.itemId(), damage, want) == before + 1, "bought gear vanished after sell-back click");
+
+			// Shift-click an unbought offer: nothing.
+			if (offers.size() > 1) {
+				shiftClick(9 + offers.get(1).slot());
+				assertUnchanged("shift-click a black market offer", bal, inv);
+			} else {
+				System.out.println("[shopkeeper-test] NOTE only one black market offer; shift-click probe skipped");
+			}
+			pass("A3 sold out click, sell-back and shift-click on offers all did nothing");
+
+			// Tier tabs still work.
+			click(0);
+			expect(isItem(clientSlot(9), "minecraft:oak_log"), "Basics tab did not show oak_log after the black market: " + clientSlot(9));
+			expect(balance() == bal, "black market scenario bookkeeping: " + balance() + " vs " + bal);
+			pass("A4 tier tab 0 works again after the black market (balance " + bal + ")");
+			return bal;
+		}
+
+		/** Daily report: /shop report shows today's totals; after a day rolls over the report arrives by itself. */
+		private void dailyReport() {
+			UUID[] idBox = new UUID[1];
+			world.getServer().computeOnServer(server -> {
+				ShopService.get().refreshDeal();
+				idBox[0] = server.getPlayerList().getPlayers().getFirst().getUUID();
+				return null;
+			});
+			var stats = world.getServer().computeOnServer(server -> ShopService.get().economy().today(idBox[0]));
+			expect(stats.earned() > 0, "no earnings recorded today before the report test: " + stats);
+
+			int seen = chatLines().size();
+			chatCommand("shop report");
+			var now = chatLines();
+			String mine = null;
+			for (int i = 0; i < now.size() - seen; i++) if (now.get(i).startsWith("[Shop] Shop report, day " + stats.day())) mine = now.get(i);
+			expect(mine != null, "/shop report produced no report line; new chat: " + now.subList(0, Math.max(0, now.size() - seen)));
+			expect(mine.contains("earned " + stats.earned()) && mine.contains("spent " + stats.spent()),
+				"report line does not match stats " + stats + ": " + mine);
+			context.takeScreenshot("shop_report_command");
+			pass("B1 /shop report: " + mine);
+
+			// Next day: ShopService.tick runs every 100 ticks and delivers yesterday's report once.
+			int seen2 = chatLines().size();
+			world.getServer().runCommand("time add 24000");
+			context.waitTicks(130);
+			var after = chatLines();
+			String auto = null;
+			for (int i = 0; i < after.size() - seen2; i++) {
+				String line = after.get(i);
+				if (line.startsWith("[Shop] Shop report, day " + stats.day()) && line.contains("earned") && line.contains("spent")) auto = line;
+			}
+			expect(auto != null, "no automatic report after the day rolled; new chat: " + after.subList(0, Math.max(0, after.size() - seen2)));
+			context.takeScreenshot("shop_report_auto");
+			boolean consumed = world.getServer().computeOnServer(server -> {
+				var eco = ShopService.get().economy();
+				var t = eco.today(idBox[0]);
+				return eco.takePendingReport(idBox[0]).isEmpty() && t.earned() == 0 && t.spent() == 0 && t.day() > stats.day();
+			});
+			expect(consumed, "after the rollover today's stats did not restart at zero or the report was not consumed");
+			pass("B2 next-day report delivered once: " + auto);
+		}
+
 		void execute() {
 			// 6. Registry check first so a bad id is reported even if clicks later fail.
 			java.util.List<String> unknown = world.getServer().computeOnServer(server -> ShopService.get().unknownItemIds());
@@ -497,6 +677,7 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 			pass("5 probes: swap, number key, drop, clone, drag, double-click, shift on unsellable/named: no dup, no loss, no credit");
 
 			bal = dailyDeals(bal);
+			bal = blackMarket(bal);
 
 			// 7. Close with the Close button.
 			click(8);
@@ -539,6 +720,9 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 			bal = balance();
 			finalBalance = bal;
 			pass("8b /shop sellall sold stone + baked potatoes, skipped renamed potatoes and swords (balance " + bal + ")");
+
+			dailyReport();
+			expect(balance() == finalBalance, "daily report scenario changed the balance: " + balance() + " vs " + finalBalance);
 		}
 	}
 }

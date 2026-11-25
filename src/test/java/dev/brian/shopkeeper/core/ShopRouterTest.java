@@ -72,4 +72,42 @@ class ShopRouterTest {
 			for (ClickKind k : ClickKind.values()) assertEquals(Action.NONE, route(s, k, ALL));
 		}
 	}
+
+	@Test
+	void blackMarketTabOnlyWhenShownAndLeft() {
+		for (ClickKind k : ClickKind.values()) {
+			Action shown = route(6, k, ALL, true, false);
+			if (k == ClickKind.LEFT) assertEquals(new Action(Type.SELECT_BLACK_MARKET, -1), shown);
+			else assertEquals(Action.NONE, shown);
+			assertEquals(Action.NONE, route(6, k, ALL, false, false), "hidden " + k);
+			assertEquals(Action.NONE, route(6, k, ALL, false, true), "hidden+selected " + k);
+		}
+	}
+
+	@Test
+	void offerSlotsBuySingleOnly() {
+		for (int s = 9; s < 54; s++) {
+			assertEquals(new Action(Type.BUY_OFFER, s - 9), route(s, ClickKind.LEFT, ALL, true, true));
+			for (ClickKind k : new ClickKind[] {ClickKind.SHIFT_LEFT, ClickKind.RIGHT, ClickKind.SHIFT_RIGHT, ClickKind.OTHER}) {
+				assertEquals(Action.NONE, route(s, k, ALL, true, true), s + " " + k);
+			}
+		}
+	}
+
+	@Test
+	void unselectedBlackMarketKeepsNormalItemRouting() {
+		assertEquals(new Action(Type.BUY_ONE, 0), route(9, ClickKind.LEFT, ALL, true, false));
+		assertEquals(new Action(Type.BUY_STACK, 0), route(9, ClickKind.SHIFT_LEFT, ALL, true, false));
+	}
+
+	@Test
+	void otherRegionsUnchangedWhileBlackMarketSelected() {
+		for (ClickKind k : ClickKind.values()) {
+			for (int s : new int[] {4, 5, 7}) assertEquals(Action.NONE, route(s, k, ALL, true, true));
+			assertEquals(route(8, k, ALL), route(8, k, ALL, true, true));
+			for (int s = 0; s < 4; s++) assertEquals(route(s, k, ALL), route(s, k, ALL, true, true));
+			for (int s = 54; s < 90; s++) assertEquals(route(s, k, ALL), route(s, k, ALL, true, true));
+			for (int s : new int[] {-1, 90, Integer.MAX_VALUE, Integer.MIN_VALUE}) assertEquals(Action.NONE, route(s, k, ALL, true, true));
+		}
+	}
 }

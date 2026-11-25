@@ -1,5 +1,6 @@
 package dev.brian.shopkeeper;
 
+import dev.brian.shopkeeper.core.BlackMarket;
 import dev.brian.shopkeeper.core.Economy;
 import dev.brian.shopkeeper.core.ShopConfig;
 import dev.brian.shopkeeper.core.ShopRouter;
@@ -38,6 +39,18 @@ public final class ShopGui extends SimpleGui {
 
 	private final UUID id;
 	private int selectedTab = 0;
+	private boolean blackMarketSelected = false;
+
+	private long day() {
+		return player.level().getServer().overworld().getOverworldClockTime() / 24000L;
+	}
+
+	/** Today's offers, same day+seed as ShopService.refreshDeal. */
+	private List<BlackMarket.Offer> offers(ShopService svc) {
+		var server = player.level().getServer();
+		if (server == null) return List.of();
+		return BlackMarket.generate(day(), server.overworld().getSeed(), svc.config());
+	}
 
 	/** Closes every shop menu currently on screen (used after a config reload). */
 	public static void closeAllOpen() {
@@ -101,6 +114,8 @@ public final class ShopGui extends SimpleGui {
 		ShopConfig cfg = svc.config();
 		Economy eco = svc.economy();
 		if (selectedTab >= cfg.tiers().size()) selectedTab = 0;
+		List<BlackMarket.Offer> offers = offers(svc);
+		if (offers.isEmpty()) blackMarketSelected = false;
 
 		for (int t = 0; t < ShopRouter.TAB_COUNT && t < cfg.tiers().size(); t++) {
 			ShopConfig.Tier tier = cfg.tiers().get(t);
@@ -108,13 +123,19 @@ public final class ShopGui extends SimpleGui {
 			if (eco.isUnlocked(id, tier.id())) {
 				Item icon = resolve(tier.icon()).orElse(Items.BARRIER);
 				b = new GuiElementBuilder(icon).setName(plain(tier.name(), ChatFormatting.GOLD));
-				if (t == selectedTab) b.glow();
-				b.addLoreLine(Component.literal(t == selectedTab ? "Selected" : "Click to browse").withStyle(ChatFormatting.GRAY));
+				if (t == selectedTab && !blackMarketSelected) b.glow();
+				b.addLoreLine(Component.literal(t == selectedTab && !blackMarketSelected ? "Selected" : "Click to browse").withStyle(ChatFormatting.GRAY));
 			} else {
 				b = new GuiElementBuilder(Items.STAINED_GLASS_PANE.gray()).setName(plain(tier.name(), ChatFormatting.RED))
 					.addLoreLine(Component.literal("Locked - unlock for " + tier.unlockPrice() + " coins - click to buy").withStyle(ChatFormatting.GRAY));
 			}
 			setSlot(t, b);
+		}
+		if (!offers.isEmpty()) {
+			GuiElementBuilder bm = new GuiElementBuilder(Items.SKELETON_SKULL).setName(plain("Black Market", ChatFormatting.DARK_PURPLE))
+				.addLoreLine(Component.literal("Used gear from fallen adventurers. New stock every day. Can't be sold back.").withStyle(ChatFormatting.GRAY));
+			if (blackMarketSelected) bm.glow();
+			setSlot(ShopRouter.BLACK_MARKET_SLOT, bm);
 		}
 		setSlot(ShopRouter.BALANCE_SLOT, new GuiElementBuilder(Items.GOLD_INGOT)
 			.setName(plain("Balance: " + eco.balance(id), ChatFormatting.YELLOW))
@@ -123,6 +144,23 @@ public final class ShopGui extends SimpleGui {
 			.addLoreLine(Component.literal("Click your own items to sell").withStyle(ChatFormatting.GRAY)));
 		setSlot(ShopRouter.CLOSE_SLOT, new GuiElementBuilder(Items.BARRIER).setName(plain("Close", ChatFormatting.RED)));
 
+		if (blackMarketSelected) {
+			var access = player.level().registryAccess();
+			long day = day();
+			for (BlackMarket.Offer o : offers) {
+				int slot = ShopRouter.ITEM_START + o.slot();
+				if (o.slot() < 0 || slot >= ShopRouter.ITEM_END) continue;
+				boolean sold = eco.isBlackMarketBought(id, day, o.slot());
+				ItemStack stack = BlackMarketStock.display(access, o, sold);
+				if (stack.isEmpty()) continue;
+				if (sold) {
+					setSlot(slot, new GuiElementBuilder(Items.STAINED_GLASS_PANE.gray()).setName(plain("Sold out", ChatFormatting.GRAY)));
+				} else {
+					setSlot(slot, stack);
+				}
+			}
+			return;
+		}
 		List<ShopConfig.Item> shown = visibleItems(cfg, eco);
 		for (int i = 0; i < shown.size(); i++) {
 			ShopConfig.Item it = shown.get(i);
@@ -174,19 +212,29 @@ public final class ShopGui extends SimpleGui {
 		boolean fresh = !eco.hasPlayer(id);
 		eco.ensurePlayer(id);
 		if (fresh) svc.save();
-		Action act = ShopRouter.route(index, kind, t -> t < cfg.tiers().size() && eco.isUnlocked(id, cfg.tiers().get(t).id()));
+		boolean bmShown = !offers(svc).isEmpty();
+		if (!bmShown) blackMarketSelected = false;
+		Action act = ShopRouter.route(index, kind, t -> t < cfg.tiers().size() && eco.isUnlocked(id, cfg.tiers().get(t).id()),
+			bmShown, blackMarketSelected);
 		switch (act.type()) {
 			case NONE -> { }
 			case CLOSE -> close();
 			case SELECT_TAB -> {
 				selectedTab = act.index();
+				blackMarketSelected = false;
 				refresh();
 			}
+			case SELECT_BLACK_MARKET -> {
+				blackMarketSelected = true;
+				refresh();
+			}
+			case BUY_OFFER -> buyOffer(svc, act.index());
 			case UNLOCK -> {
 				if (act.index() >= cfg.tiers().size()) return;
 				Economy.Result r = eco.unlock(id, cfg.tiers().get(act.index()).id());
 				if (r.ok()) {
 					selectedTab = act.index();
+					blackMarketSelected = false;
 					svc.save();
 					ok();
 				} else {
@@ -248,6 +296,60 @@ public final class ShopGui extends SimpleGui {
 			}
 		} catch (RuntimeException ex) {
 			refundQuietly(eco, r.charged(), it.id());
+			svc.save();
+			throw ex;
+		}
+		svc.save();
+		ok();
+		refresh();
+	}
+
+	/** Re-generates today's offers at click time; the menu contents are never trusted. */
+	private void buyOffer(ShopService svc, int offerSlot) {
+		Economy eco = svc.economy();
+		BlackMarket.Offer offer = null;
+		for (BlackMarket.Offer o : offers(svc)) {
+			if (o.slot() == offerSlot) offer = o;
+		}
+		if (offer == null) return;
+		long day = day();
+		if (eco.isBlackMarketBought(id, day, offer.slot())) {
+			fail("Already sold out.");
+			return;
+		}
+		ItemStack give = BlackMarketStock.make(player.level().registryAccess(), offer);
+		if (give.isEmpty()) return;
+		int max = give.getMaxStackSize();
+		int fits = 0;
+		for (ItemStack in : player.getInventory().getNonEquipmentItems()) {
+			if (in.isEmpty()) fits += max;
+			else if (ItemStack.isSameItemSameComponents(in, give)) fits += Math.max(0, max - in.getCount());
+		}
+		if (fits < 1) {
+			fail("Your inventory is full.");
+			return;
+		}
+		if (eco.balance(id) < offer.price()) {
+			fail("Not enough coins.");
+			return;
+		}
+		if (!eco.markBlackMarketBought(id, day, offer.slot())) return;
+		Economy.Result r = eco.spend(id, offer.price());
+		if (!r.ok()) {
+			// unreachable after the balance check; the mark stays so nothing can be duplicated
+			Shopkeeper.LOGGER.error("Shop: black market spend failed after check: {}", r.error());
+			svc.save();
+			return;
+		}
+		try {
+			ItemStack out = give.copy();
+			player.getInventory().add(out);
+			if (!out.isEmpty()) {
+				eco.refund(id, r.charged());
+				Shopkeeper.LOGGER.error("Shop: black market item did not fit despite capacity check; refunded {} coins (player {})", r.charged(), id);
+			}
+		} catch (RuntimeException ex) {
+			refundQuietly(eco, r.charged(), offer.itemId());
 			svc.save();
 			throw ex;
 		}

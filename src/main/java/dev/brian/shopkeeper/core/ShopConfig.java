@@ -5,7 +5,16 @@ import java.util.List;
 import java.util.Map;
 
 /** Immutable, validated shop definition. Pure Java: item ids are plain strings. */
-public record ShopConfig(long startingBalance, double sellFraction, List<Tier> tiers, List<Item> items) {
+public record ShopConfig(long startingBalance, double sellFraction, List<Tier> tiers, List<Item> items,
+		BlackMarketSettings blackMarket) {
+	public static final int MIN_BLACK_MARKET_SLOTS = 1;
+	public static final int MAX_BLACK_MARKET_SLOTS = 9;
+
+	/** Optional "blackMarket" block. Defaults: enabled, 6 slots. */
+	public record BlackMarketSettings(boolean enabled, int slots) {
+		public static final BlackMarketSettings DEFAULT = new BlackMarketSettings(true, 6);
+	}
+
 	public static final double MIN_SELL_FRACTION = 0.25;
 	public static final double MAX_SELL_FRACTION = 0.40;
 	public static final int MAX_ITEMS_PER_TIER = 45;
@@ -15,7 +24,13 @@ public record ShopConfig(long startingBalance, double sellFraction, List<Tier> t
 	/** sell is 0 and sellable false when the item cannot be sold back. maxStack null = vanilla. */
 	public record Item(String id, String tier, long buy, long sell, boolean sellable, Integer maxStack) {}
 
+	/** Convenience: default black market settings. */
+	public ShopConfig(long startingBalance, double sellFraction, List<Tier> tiers, List<Item> items) {
+		this(startingBalance, sellFraction, tiers, items, BlackMarketSettings.DEFAULT);
+	}
+
 	public ShopConfig {
+		if (blackMarket == null) blackMarket = BlackMarketSettings.DEFAULT;
 		tiers = List.copyOf(tiers);
 		items = List.copyOf(items);
 	}

@@ -1,7 +1,9 @@
 package dev.brian.shopkeeper;
 
 import dev.brian.shopkeeper.core.Daily;
+import dev.brian.shopkeeper.core.DayStats;
 import dev.brian.shopkeeper.core.Economy;
+import dev.brian.shopkeeper.core.ReportFormat;
 import dev.brian.shopkeeper.core.ShopConfig;
 import dev.brian.shopkeeper.core.ShopConfigParser;
 import java.io.IOException;
@@ -11,10 +13,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -112,7 +118,43 @@ public final class ShopService {
 	}
 
 	public void refreshDeal(long day, long seed) {
+		economy.setDay(day);
 		economy.setDeal(Daily.pick(day, seed, config));
+	}
+
+	private long reportedDay = Long.MIN_VALUE;
+	private int tickCounter;
+
+	/** Cheap: only looks at the clock every 100 ticks. On a new day sends pending reports to online players. */
+	public void tick() {
+		if (server == null || ++tickCounter < 100) return;
+		tickCounter = 0;
+		long day = server.overworld().getOverworldClockTime() / 24000L;
+		if (day == reportedDay) return;
+		reportedDay = day;
+		refreshDeal();
+		boolean sent = false;
+		for (ServerPlayer p : server.getPlayerList().getPlayers()) sent |= sendPendingReport(p);
+		if (sent) save();
+	}
+
+	/** Sends the previous day's report to the player once, if there is one. Caller saves. */
+	public boolean sendPendingReport(ServerPlayer p) {
+		Optional<DayStats> r = economy.takePendingReport(p.getUUID());
+		if (r.isEmpty()) return false;
+		p.sendSystemMessage(reportMessage(r.get()));
+		return true;
+	}
+
+	public static Component reportMessage(DayStats s) {
+		return Component.literal("[Shop] ").withStyle(ChatFormatting.GOLD)
+			.append(Component.literal(ReportFormat.format(s, ShopService::itemName)).withStyle(ChatFormatting.YELLOW));
+	}
+
+	static String itemName(String id) {
+		Identifier ident = Identifier.tryParse(id);
+		if (ident == null || !BuiltInRegistries.ITEM.containsKey(ident)) return id;
+		return BuiltInRegistries.ITEM.getValue(ident).getDefaultInstance().getHoverName().getString();
 	}
 
 	public void save() {

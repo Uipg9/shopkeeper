@@ -3,6 +3,7 @@ package dev.brian.shopkeeper;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 
 import net.minecraft.server.level.ServerPlayer;
@@ -25,6 +26,16 @@ public class Shopkeeper implements ModInitializer {
 		ShopCommands.register();
 		ServerLifecycleEvents.SERVER_STARTED.register(ShopService::init);
 		ServerLifecycleEvents.SERVER_STOPPING.register(server -> ShopService.shutdown());
+		ServerTickEvents.END_SERVER_TICK.register(server -> {
+			ShopService svc = ShopService.get();
+			if (svc != null) svc.tick();
+		});
+		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+			ShopService svc = ShopService.get();
+			if (svc == null) return;
+			svc.refreshDeal();
+			if (svc.sendPendingReport(handler.getPlayer())) svc.save();
+		});
 		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> handler.getPlayer().closeContainer());
 		ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
 			if (entity instanceof ServerPlayer player) player.closeContainer();

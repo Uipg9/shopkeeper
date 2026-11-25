@@ -117,6 +117,27 @@ class DefaultShopConfigTest {
 		assertTrue(item("diamond_pickaxe").buy() > 3 * item("diamond").buy());
 	}
 
+	@Test
+	void blackMarketPoolIsWideAndOffersAreDistinct() {
+		long gear = config.items().stream().filter(i -> BlackMarket.gearType(i.id()) != null).count();
+		assertTrue(gear >= 24, "only " + gear + " eligible gear items");
+		for (long day = 0; day <= 200; day++) {
+			List<BlackMarket.Offer> offers = BlackMarket.generate(day, 12345L, config);
+			assertEquals(6, offers.size(), "day " + day);
+			assertEquals(6, offers.stream().map(BlackMarket.Offer::itemId).distinct().count(), "day " + day);
+		}
+	}
+
+	@Test
+	void gearLaddersStoneChainmailIron() {
+		assertTrue(item("stone_pickaxe").buy() < item("iron_pickaxe").buy());
+		assertTrue(item("stone_sword").buy() < item("iron_sword").buy());
+		assertTrue(item("stone_axe").buy() < item("iron_axe").buy());
+		for (String p : List.of("helmet", "chestplate", "leggings", "boots")) {
+			assertTrue(item("chainmail_" + p).buy() < item("iron_" + p).buy(), p);
+		}
+	}
+
 	static long median(List<ShopConfig.Item> items) {
 		long[] b = items.stream().mapToLong(ShopConfig.Item::buy).sorted().toArray();
 		return b[b.length / 2];

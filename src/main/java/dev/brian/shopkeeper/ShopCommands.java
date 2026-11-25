@@ -45,11 +45,26 @@ public final class ShopCommands {
 					ctx.getSource().sendSuccess(() -> Component.literal("Balance: " + bal + " coins"), false);
 					return Command.SINGLE_SUCCESS;
 				}))
+				.then(Commands.literal("report").executes(ctx -> report(ctx.getSource())))
 				.then(Commands.literal("sell").executes(ctx -> sellHand(ctx.getSource())))
 				.then(Commands.literal("sellall").executes(ctx -> sellAll(ctx.getSource())))
 				.then(Commands.literal("reload")
 					.requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
 					.executes(ctx -> reload(ctx.getSource())))));
+	}
+
+	private static int report(CommandSourceStack source) throws CommandSyntaxException {
+		ServerPlayer p = source.getPlayerOrException();
+		ShopService svc = ShopService.get();
+		if (svc == null) {
+			source.sendFailure(Component.literal("The shop is not ready."));
+			return 0;
+		}
+		svc.refreshDeal();
+		svc.economy().ensurePlayer(p.getUUID());
+		Component msg = ShopService.reportMessage(svc.economy().today(p.getUUID()));
+		source.sendSuccess(() -> msg, false);
+		return Command.SINGLE_SUCCESS;
 	}
 
 	private static int sellHand(CommandSourceStack source) throws CommandSyntaxException {

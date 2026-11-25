@@ -99,4 +99,56 @@ class ShopDataCodecTest {
 		assertNull(l.config());
 		assertFalse(l.errors().isEmpty());
 	}
+
+	@Test
+	void statsPendingAndBlackMarketRoundTrip() {
+		UUID id = UUID.randomUUID();
+		var stats = new dev.brian.shopkeeper.core.DayStats(7, 30, 20, 3, 2, 15, "minecraft:diamond");
+		var pending = new dev.brian.shopkeeper.core.DayStats(6, 1, 2, 3, 4, 5, "a:b");
+		ShopData d = new ShopData();
+		d.capture(Map.of(id, new Economy.PlayerSnapshot(5, Set.of("a"), true, stats, pending, 7, Set.of(1, 4))));
+		JsonElement j = ShopData.CODEC.encodeStart(JsonOps.INSTANCE, d).getOrThrow();
+		Economy.PlayerSnapshot back = decode(j.toString()).toSnapshot().get(id);
+		assertEquals(stats, back.stats());
+		assertEquals(pending, back.pendingReport());
+		assertEquals(7, back.blackMarketDay());
+		assertEquals(Set.of(1, 4), back.blackMarketSlots());
+	}
+
+	@Test
+	void oldFormatWithoutNewFieldsLoads() {
+		UUID id = UUID.randomUUID();
+		Economy.PlayerSnapshot s = decode("{\"players\":{\"" + id + "\":{\"balance\":50,\"unlockedTiers\":[\"x\"],\"grantedStarting\":true}}}")
+			.toSnapshot().get(id);
+		assertEquals(50, s.balance());
+		assertNull(s.stats());
+		assertNull(s.pendingReport());
+		assertTrue(s.blackMarketSlots().isEmpty());
+	}
+
+	@Test
+	void badNewValuesAreSanitised() {
+		UUID id = UUID.randomUUID();
+		Economy.PlayerSnapshot s = decode("{\"players\":{\"" + id + "\":{\"balance\":1,\"bmSlots\":[-3,2],"
+			+ "\"stats\":{\"day\":1,\"earned\":-5,\"spent\":-1,\"itemsSold\":-2}}}}").toSnapshot().get(id);
+		assertEquals(Set.of(2), s.blackMarketSlots());
+		assertEquals(0, s.stats().earned());
+		assertEquals(0, s.stats().spent());
+		assertEquals(0, s.stats().itemsSold());
+	}
+
+	@Test
+	void economyStatsSurviveFullPersistenceCycle() {
+		Economy e = new Economy(ShopService.resolveConfig(null, readDefault()).config());
+		UUID id = UUID.randomUUID();
+		e.setDay(3);
+		e.ensurePlayer(id);
+		e.markBlackMarketBought(id, 3, 2);
+		ShopData d = new ShopData();
+		d.capture(e.snapshot());
+		JsonElement j = ShopData.CODEC.encodeStart(JsonOps.INSTANCE, d).getOrThrow();
+		Economy e2 = new Economy(e.config());
+		e2.restore(decode(j.toString()).toSnapshot());
+		assertTrue(e2.isBlackMarketBought(id, 3, 2));
+	}
 }

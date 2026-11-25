@@ -103,6 +103,40 @@ class ShopConfigParserTest {
 		assertError(ShopConfigParser.parse(json("0.3", five, "[]")), "4 tiers");
 	}
 
+	static String withBlackMarket(String block) {
+		String base = json("0.3", TIERS, "[{\"id\":\"a:b\",\"tier\":\"basics\",\"buy\":10}]");
+		return base.substring(0, base.length() - 1) + ",\"blackMarket\":" + block + "}";
+	}
+
+	@Test
+	void blackMarketDefaultsWhenAbsent() {
+		var r = ShopConfigParser.parse(json("0.3", TIERS, "[]"));
+		assertTrue(r.ok());
+		assertEquals(new ShopConfig.BlackMarketSettings(true, 6), r.config().blackMarket());
+	}
+
+	@Test
+	void blackMarketParsed() {
+		var r = ShopConfigParser.parse(withBlackMarket("{\"enabled\":false,\"slots\":9}"));
+		assertTrue(r.ok(), r.errors().toString());
+		assertEquals(new ShopConfig.BlackMarketSettings(false, 9), r.config().blackMarket());
+		r = ShopConfigParser.parse(withBlackMarket("{\"slots\":1}"));
+		assertEquals(new ShopConfig.BlackMarketSettings(true, 1), r.config().blackMarket());
+		r = ShopConfigParser.parse(withBlackMarket("{}"));
+		assertEquals(new ShopConfig.BlackMarketSettings(true, 6), r.config().blackMarket());
+	}
+
+	@Test
+	void blackMarketRejectsBadValues() {
+		assertError(ShopConfigParser.parse(withBlackMarket("{\"slots\":0}")), "slots");
+		assertError(ShopConfigParser.parse(withBlackMarket("{\"slots\":10}")), "slots");
+		assertError(ShopConfigParser.parse(withBlackMarket("{\"slots\":2.5}")), "slots");
+		assertError(ShopConfigParser.parse(withBlackMarket("{\"slots\":\"six\"}")), "slots");
+		assertError(ShopConfigParser.parse(withBlackMarket("{\"enabled\":\"yes\"}")), "enabled");
+		assertError(ShopConfigParser.parse(withBlackMarket("5")), "blackMarket");
+		assertError(ShopConfigParser.parse(withBlackMarket("[]")), "blackMarket");
+	}
+
 	@Test
 	void badDataNeverThrows() {
 		String[] bads = { "", "not json", "[]", "null", "{}", "{\"tiers\":5}", "{\"tiers\":[1],\"items\":[2]}",

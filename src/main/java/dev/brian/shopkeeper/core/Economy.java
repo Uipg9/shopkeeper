@@ -3,15 +3,23 @@ package dev.brian.shopkeeper.core;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
 /** Pure in-memory economy. Every failing operation leaves state untouched. */
 public final class Economy {
 	/** Persistable per-player state. */
-	public record PlayerSnapshot(long balance, Set<String> unlockedTiers, boolean grantedStarting) {
+	public record PlayerSnapshot(long balance, Set<String> unlockedTiers, boolean grantedStarting, DayStats stats,
+			DayStats pendingReport, long blackMarketDay, Set<Integer> blackMarketSlots) {
 		public PlayerSnapshot {
 			unlockedTiers = Set.copyOf(unlockedTiers);
+			blackMarketSlots = Set.copyOf(blackMarketSlots);
+		}
+
+		/** stats/pendingReport may be null (none). */
+		public PlayerSnapshot(long balance, Set<String> unlockedTiers, boolean grantedStarting) {
+			this(balance, unlockedTiers, grantedStarting, null, null, 0, Set.of());
 		}
 	}
 
@@ -26,6 +34,10 @@ public final class Economy {
 		long balance;
 		final Set<String> unlocked = new HashSet<>();
 		boolean granted;
+		DayStats stats;
+		DayStats pending;
+		long bmDay;
+		final Set<Integer> bmSlots = new HashSet<>();
 	}
 
 	private final ShopConfig config;
@@ -45,6 +57,67 @@ public final class Economy {
 
 	public Daily.Deal deal() {
 		return deal;
+	}
+
+	private long day = -1;
+
+	/** Current in-game day. Stats roll over lazily per player when they next change or are read. Never goes backwards. */
+	public void setDay(long day) {
+		if (day > this.day) this.day = day;
+	}
+
+	public long day() {
+		return day;
+	}
+
+	/** Moves an older day's stats into pending (if it had trades) and starts a fresh day. */
+	private DayStats roll(Player p) {
+		long now = Math.max(day, 0);
+		if (p.stats == null) {
+			p.stats = DayStats.fresh(now);
+		} else if (day >= 0 && p.stats.day() < day) {
+			if (p.stats.hasActivity()) p.pending = p.stats;
+			p.stats = DayStats.fresh(day);
+		}
+		return p.stats;
+	}
+
+	/** Today's stats so far (fresh zeros for unknown players). Rolls the player's day if needed. */
+	public DayStats today(UUID id) {
+		Player p = players.get(id);
+		return p == null ? DayStats.fresh(Math.max(day, 0)) : roll(p);
+	}
+
+	/** The previous day's stats if there was any trading, returned once. */
+	public Optional<DayStats> takePendingReport(UUID id) {
+		Player p = players.get(id);
+		if (p == null) return Optional.empty();
+		roll(p);
+		DayStats r = p.pending;
+		p.pending = null;
+		return r != null && r.hasActivity() ? Optional.of(r) : Optional.empty();
+	}
+
+	/** Items bought today from the black market slots (copy). Purchases from other days are dropped. */
+	public Set<Integer> blackMarketBought(UUID id, long day) {
+		Player p = players.get(id);
+		if (p == null) return Set.of();
+		if (p.bmDay != day) {
+			p.bmSlots.clear();
+			p.bmDay = day;
+		}
+		return Set.copyOf(p.bmSlots);
+	}
+
+	public boolean isBlackMarketBought(UUID id, long day, int slot) {
+		return blackMarketBought(id, day).contains(slot);
+	}
+
+	/** True if newly marked; false for unknown players, negative slots, or already bought. */
+	public boolean markBlackMarketBought(UUID id, long day, int slot) {
+		if (slot < 0 || !players.containsKey(id)) return false;
+		blackMarketBought(id, day);
+		return players.get(id).bmSlots.add(slot);
 	}
 
 	/** Effective buy price including today's sale. */
@@ -115,8 +188,23 @@ public final class Economy {
 	/** Charges only for min(qty, fits). All-or-nothing on funds. */
 	public Result buy(UUID id, String itemId, int qty, int fits) {
 		Result q = quoteBuy(id, itemId, qty, fits);
-		if (q.ok()) players.get(id).balance -= q.charged();
+		if (q.ok()) {
+			Player p = players.get(id);
+			p.balance -= q.charged();
+			p.stats = roll(p).withPurchase(q.delivered(), q.charged());
+		}
 		return q;
+	}
+
+	/** Charges an arbitrary price (black market). All-or-nothing on funds; counts as spending in today's stats. */
+	public Result spend(UUID id, long price) {
+		Player p = players.get(id);
+		if (p == null) return Result.fail("unknown player");
+		if (price <= 0) return Result.fail("price must be positive");
+		if (price > p.balance) return Result.fail("insufficient funds");
+		p.balance = Math.subtractExact(p.balance, price);
+		p.stats = roll(p).withPurchase(0, price);
+		return new Result(true, price, 0, 0, 0, null);
 	}
 
 	/** Result.removed() is the count the caller must take from the inventory. */
@@ -137,6 +225,7 @@ public final class Economy {
 			return Result.fail("balance overflow");
 		}
 		p.balance = newBalance;
+		p.stats = roll(p).withSale(itemId, qty, credit);
 		return new Result(true, 0, 0, credit, qty, null);
 	}
 
@@ -149,12 +238,13 @@ public final class Economy {
 		if (tier.unlockPrice() > p.balance) return Result.fail("insufficient funds");
 		p.balance -= tier.unlockPrice();
 		p.unlocked.add(tierId);
+		p.stats = roll(p).withPurchase(0, tier.unlockPrice());
 		return new Result(true, tier.unlockPrice(), 0, 0, 0, null);
 	}
 
 	public Map<UUID, PlayerSnapshot> snapshot() {
 		Map<UUID, PlayerSnapshot> out = new HashMap<>();
-		players.forEach((k, p) -> out.put(k, new PlayerSnapshot(p.balance, p.unlocked, p.granted)));
+		players.forEach((k, p) -> out.put(k, new PlayerSnapshot(p.balance, p.unlocked, p.granted, p.stats, p.pending, p.bmDay, p.bmSlots)));
 		return out;
 	}
 
@@ -164,6 +254,7 @@ public final class Economy {
 		Player p = players.get(id);
 		if (p == null) throw new IllegalArgumentException("unknown player");
 		p.balance = Math.addExact(p.balance, amount);
+		p.stats = roll(p).withRefund(amount);
 	}
 
 	/**
@@ -177,6 +268,10 @@ public final class Economy {
 			p.balance = Math.max(0, s.balance());
 			p.granted = s.grantedStarting();
 			p.unlocked.addAll(s.unlockedTiers());
+			p.stats = s.stats();
+			p.pending = s.pendingReport();
+			p.bmDay = s.blackMarketDay();
+			s.blackMarketSlots().stream().filter(x -> x >= 0).forEach(p.bmSlots::add);
 			players.put(k, p);
 		});
 	}
