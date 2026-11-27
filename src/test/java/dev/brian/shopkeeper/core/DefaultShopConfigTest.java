@@ -194,7 +194,8 @@ class DefaultShopConfigTest {
 		long gear = config.items().stream().filter(i -> BlackMarket.gearType(i.id()) != null).count();
 		assertTrue(gear >= 24, "only " + gear + " eligible gear items");
 		for (long day = 0; day <= 200; day++) {
-			List<BlackMarket.Offer> offers = BlackMarket.generate(day, 12345L, config);
+			List<BlackMarket.Offer> offers = BlackMarket.generate(day, 12345L, config).stream()
+				.filter(o -> o.kind() == BlackMarket.Kind.GEAR).toList();
 			assertEquals(6, offers.size(), "day " + day);
 			assertEquals(6, offers.stream().map(BlackMarket.Offer::itemId).distinct().count(), "day " + day);
 		}

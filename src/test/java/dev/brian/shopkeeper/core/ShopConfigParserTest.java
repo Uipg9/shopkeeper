@@ -136,12 +136,30 @@ class ShopConfigParserTest {
 		assertEquals(new ShopConfig.BlackMarketSettings(true, 1), r.config().blackMarket());
 		r = ShopConfigParser.parse(withBlackMarket("{}"));
 		assertEquals(new ShopConfig.BlackMarketSettings(true, 6), r.config().blackMarket());
+		r = ShopConfigParser.parse(withBlackMarket("{\"slots\":18}"));
+		assertEquals(new ShopConfig.BlackMarketSettings(true, 18), r.config().blackMarket());
+	}
+
+	@Test
+	void blackMarketKindToggles() {
+		var r = ShopConfigParser.parse(withBlackMarket("{\"enabled\":true,\"slots\":6}"));
+		assertTrue(r.ok(), r.errors().toString());
+		var bm = r.config().blackMarket();
+		assertTrue(bm.books() && bm.rare() && bm.crate());
+		r = ShopConfigParser.parse(withBlackMarket("{\"books\":false,\"rare\":true,\"crate\":false}"));
+		assertTrue(r.ok(), r.errors().toString());
+		assertEquals(new ShopConfig.BlackMarketSettings(true, 6, false, true, false), r.config().blackMarket());
+		r = ShopConfigParser.parse(withBlackMarket("{\"rare\":false,\"books\":null}"));
+		assertEquals(new ShopConfig.BlackMarketSettings(true, 6, true, false, true), r.config().blackMarket());
 	}
 
 	@Test
 	void blackMarketRejectsBadValues() {
 		assertError(ShopConfigParser.parse(withBlackMarket("{\"slots\":0}")), "slots");
-		assertError(ShopConfigParser.parse(withBlackMarket("{\"slots\":10}")), "slots");
+		assertError(ShopConfigParser.parse(withBlackMarket("{\"slots\":19}")), "slots");
+		assertError(ShopConfigParser.parse(withBlackMarket("{\"books\":1}")), "books");
+		assertError(ShopConfigParser.parse(withBlackMarket("{\"rare\":\"no\"}")), "rare");
+		assertError(ShopConfigParser.parse(withBlackMarket("{\"crate\":[]}")), "crate");
 		assertError(ShopConfigParser.parse(withBlackMarket("{\"slots\":2.5}")), "slots");
 		assertError(ShopConfigParser.parse(withBlackMarket("{\"slots\":\"six\"}")), "slots");
 		assertError(ShopConfigParser.parse(withBlackMarket("{\"enabled\":\"yes\"}")), "enabled");

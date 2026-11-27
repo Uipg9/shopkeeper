@@ -209,6 +209,11 @@ public final class Economy {
 
 	/** Result.removed() is the count the caller must take from the inventory. */
 	public Result sell(UUID id, String itemId, int qty) {
+		return sell(id, itemId, qty, 100);
+	}
+
+	/** Sells at ratePct percent of the normal sell price (the Sell Wand); rounds down, so a sale may credit 0. */
+	public Result sell(UUID id, String itemId, int qty, int ratePct) {
 		Player p = players.get(id);
 		if (p == null) return Result.fail("unknown player");
 		ShopConfig.Item item = items.get(itemId);
@@ -219,7 +224,7 @@ public final class Economy {
 		long credit;
 		long newBalance;
 		try {
-			credit = Math.multiplyExact(sellPrice(item), (long) qty);
+			credit = WandTier.payout(Math.multiplyExact(sellPrice(item), (long) qty), ratePct);
 			newBalance = Math.addExact(p.balance, credit);
 		} catch (ArithmeticException ex) {
 			return Result.fail("balance overflow");

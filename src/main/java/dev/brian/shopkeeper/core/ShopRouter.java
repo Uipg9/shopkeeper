@@ -11,7 +11,8 @@ public final class ShopRouter {
 	public static final int PREV_PAGE_SLOT = 5;
 	public static final int BLACK_MARKET_SLOT = 6;
 	public static final int NEXT_PAGE_SLOT = 7;
-	public static final int CLOSE_SLOT = 8;
+	/** Opens the Sell Wand tab (it replaced the old Close button; Esc / controller B close the menu). */
+	public static final int WAND_SLOT = 8;
 	public static final int ITEM_START = 9;
 	public static final int ITEM_END = 54; // exclusive
 	public static final int PAGE_SIZE = ITEM_END - ITEM_START;
@@ -20,7 +21,7 @@ public final class ShopRouter {
 
 	public enum ClickKind { LEFT, SHIFT_LEFT, RIGHT, SHIFT_RIGHT, OTHER }
 
-	public enum Type { SELECT_TAB, SELECT_BLACK_MARKET, PREV_PAGE, NEXT_PAGE, BUY_OFFER, UNLOCK, BUY_ONE, BUY_STACK, SELL_ONE, SELL_STACK, CLOSE, NONE }
+	public enum Type { SELECT_TAB, SELECT_BLACK_MARKET, PREV_PAGE, NEXT_PAGE, BUY_OFFER, UNLOCK, BUY_ONE, BUY_STACK, SELL_ONE, SELL_STACK, SELECT_WAND, DETAIL, NONE }
 
 	/** index: tab number, in-page item index (0..44), or player slot (0..35: 0-26 main, 27-35 hotbar); -1 for none. */
 	public record Action(Type type, int index) {
@@ -69,8 +70,8 @@ public final class ShopRouter {
 			if (kind != ClickKind.LEFT) return Action.NONE;
 			return new Action(tabUnlocked.test(slot) ? Type.SELECT_TAB : Type.UNLOCK, slot);
 		}
-		if (slot == CLOSE_SLOT) {
-			return kind == ClickKind.LEFT ? new Action(Type.CLOSE, -1) : Action.NONE;
+		if (slot == WAND_SLOT) {
+			return kind == ClickKind.LEFT ? new Action(Type.SELECT_WAND, -1) : Action.NONE;
 		}
 		if (slot >= ITEM_START && slot < ITEM_END) {
 			int i = slot - ITEM_START;
@@ -78,6 +79,7 @@ public final class ShopRouter {
 			return switch (kind) {
 				case LEFT -> new Action(Type.BUY_ONE, i);
 				case SHIFT_LEFT -> new Action(Type.BUY_STACK, i);
+				case RIGHT -> new Action(Type.DETAIL, i);
 				default -> Action.NONE;
 			};
 		}

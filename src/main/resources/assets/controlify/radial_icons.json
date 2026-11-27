@@ -1,0 +1,8 @@
+{
+	"shopkeeper:open_shop": { "model": "minecraft:emerald" },
+	"shopkeeper:sell_hand": { "model": "minecraft:gold_nugget" },
+	"shopkeeper:sell_all": { "model": "minecraft:gold_ingot" },
+	"shopkeeper:sell_inventory": { "model": "minecraft:gold_block" },
+	"shopkeeper:sell_undo": { "model": "minecraft:clock" },
+	"shopkeeper:sell_wand": { "model": "minecraft:blaze_rod" }
+}

@@ -405,7 +405,8 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 				ShopService.get().refreshDeal();
 				var level = server.overworld();
 				return dev.brian.shopkeeper.core.BlackMarket.generate(ShopService.get().economy().day(), level.getSeed(),
-					ShopService.get().config());
+					ShopService.get().config()).stream()
+					.filter(o -> o.kind() == dev.brian.shopkeeper.core.BlackMarket.Kind.GEAR).toList();
 			});
 		}
 
@@ -465,7 +466,10 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 
 		/** Tier id of an offer's item. */
 		private String offerTier(dev.brian.shopkeeper.core.BlackMarket.Offer o) {
-			return world.getServer().computeOnServer(server -> ShopService.get().config().item(o.itemId()).tier());
+			return world.getServer().computeOnServer(server -> {
+				var it = ShopService.get().config().item(o.itemId());
+				return it == null ? "basics" : it.tier();
+			});
 		}
 
 		private long blackMarket(long bal) {
@@ -762,7 +766,7 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 			give(DAMAGED_SWORD);
 			long credit = 6 * sellNow("minecraft:stone") + 4 * sellNow("minecraft:baked_potato");
 			seen = chatLines().size();
-			chatCommand("sell all");
+			chatCommand("sell inventory");
 			expect(count("minecraft:stone") == 0 && count("minecraft:baked_potato") == 0, "/sell all left sellable stacks: " + inventory());
 			expect(count(NOT_IN_SHOP) == 2 && count("minecraft:diamond_sword") == 1, "/sell all touched unsellable stacks: " + inventory());
 			expect(balance() == bal + credit, "/sell all credited " + (balance() - bal) + ", expected " + credit);
@@ -1006,11 +1010,11 @@ public class ShopkeeperClientGameTest implements FabricClientGameTest {
 			bal = blackMarket(bal);
 			bal = paging(bal);
 
-			// 7. Close with the Close button.
-			click(8);
+			// 7. Close the menu (slot 8 is now the Sell Wand tab; Esc closes).
+			context.runOnClient(mc -> mc.player.closeContainer());
 			context.waitTicks(10);
 			boolean closed = context.computeOnClient(mc -> mc.gui.screen() == null);
-			expect(closed, "Close button did not close the shop");
+			expect(closed, "closing did not close the shop");
 			context.takeScreenshot("shop_closed");
 			expect(balance() == bal, "closing changed the balance");
 			finalBalance = bal;

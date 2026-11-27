@@ -4,6 +4,7 @@ import dev.brian.shopkeeper.core.BlackMarket;
 import dev.brian.shopkeeper.core.Economy;
 import dev.brian.shopkeeper.core.ShopConfig;
 import dev.brian.shopkeeper.core.ShopRouter;
+import dev.brian.shopkeeper.core.WandTier;
 import dev.brian.shopkeeper.core.ShopRouter.Action;
 import dev.brian.shopkeeper.core.ShopRouter.ClickKind;
 
@@ -40,6 +41,10 @@ public final class ShopGui extends SimpleGui {
 	private final UUID id;
 	private int selectedTab = 0;
 	private boolean blackMarketSelected = false;
+	/** The Sell Wand tab is open (items area shows wand buttons). */
+	private boolean wandSelected = false;
+	/** Item id of the open buy/sell detail page, or null. Re-resolved against the live config on every click. */
+	private String detailItemId = null;
 	/** 0-based page of the selected tier; reset on tab switch, clamped against the live config. */
 	private int page = 0;
 
@@ -155,7 +160,7 @@ public final class ShopGui extends SimpleGui {
 			if (eco.isUnlocked(id, tier.id())) {
 				Item icon = resolve(tier.icon()).orElse(Items.BARRIER);
 				b = new GuiElementBuilder(icon).setName(plain(tier.name(), ChatFormatting.GOLD));
-				if (t == selectedTab && !blackMarketSelected) b.glow();
+				if (t == selectedTab && !blackMarketSelected && !wandSelected) b.glow();
 				b.addLoreLine(Component.literal(t == selectedTab && !blackMarketSelected ? "Selected" : "Click to browse").withStyle(ChatFormatting.GRAY));
 			} else {
 				b = new GuiElementBuilder(Items.STAINED_GLASS_PANE.gray()).setName(plain(tier.name(), ChatFormatting.RED))
@@ -165,7 +170,8 @@ public final class ShopGui extends SimpleGui {
 		}
 		if (!offers.isEmpty()) {
 			GuiElementBuilder bm = new GuiElementBuilder(Items.SKELETON_SKULL).setName(plain("Black Market", ChatFormatting.DARK_PURPLE))
-				.addLoreLine(Component.literal("Used gear from fallen adventurers. New stock every day. Can't be sold back.").withStyle(ChatFormatting.GRAY));
+				.addLoreLine(Component.literal("Used gear, books, rare loot and mystery bundles.").withStyle(ChatFormatting.GRAY))
+				.addLoreLine(Component.literal("New stock every day. Can't be sold back.").withStyle(ChatFormatting.GRAY));
 			if (blackMarketSelected) bm.glow();
 			setSlot(ShopRouter.BLACK_MARKET_SLOT, bm);
 		}
@@ -173,12 +179,29 @@ public final class ShopGui extends SimpleGui {
 			.setName(plain("Balance: " + eco.balance(id), ChatFormatting.YELLOW))
 			.addLoreLine(Component.literal("Click an item to buy 1").withStyle(ChatFormatting.GRAY))
 			.addLoreLine(Component.literal("Shift-click to buy a stack").withStyle(ChatFormatting.GRAY))
+			.addLoreLine(Component.literal("Right-click an item for buy/sell buttons").withStyle(ChatFormatting.GRAY))
 			.addLoreLine(Component.literal("Click your own items to sell").withStyle(ChatFormatting.GRAY));
 		if (!blackMarketSelected && pages > 1) {
 			balance.addLoreLine(Component.literal("Page " + (page + 1) + "/" + pages).withStyle(ChatFormatting.GRAY));
 		}
 		setSlot(ShopRouter.BALANCE_SLOT, balance);
-		setSlot(ShopRouter.CLOSE_SLOT, new GuiElementBuilder(Items.BARRIER).setName(plain("Close", ChatFormatting.RED)));
+		GuiElementBuilder wandTab = new GuiElementBuilder(Items.BLAZE_ROD).setName(plain("Sell Wand", ChatFormatting.GOLD))
+			.addLoreLine(Component.literal("Sell whole chests at once. Buy, upgrade, recharge.").withStyle(ChatFormatting.GRAY));
+		if (wandSelected) wandTab.glow();
+		setSlot(ShopRouter.WAND_SLOT, wandTab);
+
+		if (wandSelected) {
+			renderWand(svc);
+			return;
+		}
+		if (detailItemId != null) {
+			ShopConfig.Item it = cfg.item(detailItemId);
+			if (it != null && resolve(it.id()).isPresent() && eco.isUnlocked(id, it.tier())) {
+				renderDetail(eco, it);
+				return;
+			}
+			detailItemId = null;
+		}
 
 		if (blackMarketSelected) {
 			var access = player.level().registryAccess();
@@ -217,6 +240,179 @@ public final class ShopGui extends SimpleGui {
 			}
 			setSlot(ShopRouter.ITEM_START + i, eb);
 		}
+	}
+
+	/** Opens on the Sell Wand tab (/shop wand, /sellwand). */
+	public void showWandTab() {
+		wandSelected = true;
+		blackMarketSelected = false;
+		detailItemId = null;
+		refresh();
+	}
+
+	// ---- Sell Wand tab ----
+	private static final int WAND_INFO_SLOT = 22;
+	private static final int WAND_BUY_SLOT = 29;
+	private static final int WAND_UPGRADE_SLOT = 31;
+	private static final int WAND_RECHARGE_SLOT = 33;
+	private static final int WAND_TIERS_SLOT = 40;
+
+	private static Component gray(String s) {
+		return plain(s, ChatFormatting.GRAY);
+	}
+
+	private void renderWand(ShopService svc) {
+		ItemStack wand = SellWand.find(player);
+		if (wand.isEmpty()) {
+			setSlot(WAND_INFO_SLOT, new GuiElementBuilder(Items.STICK).setName(plain("No Sell Wand yet", ChatFormatting.GRAY))
+				.addLoreLine(gray("Right-click a chest with it to sell")).addLoreLine(gray("everything the shop buys inside.")));
+			WandTier.Tier t1 = WandTier.of(1);
+			setSlot(WAND_BUY_SLOT, new GuiElementBuilder(Items.EMERALD).setName(plain("Buy Sell Wand - " + t1.cost() + " coins", ChatFormatting.GREEN))
+				.addLoreLine(gray("Tier I: " + t1.ratePct() + "% of sell price, " + t1.uses() + " uses")).glow());
+		} else {
+			SellWand.Data d = SellWand.read(wand);
+			WandTier.Tier tier = WandTier.of(d.level());
+			GuiElementBuilder info = new GuiElementBuilder(Items.BLAZE_ROD).setName(plain("Your Sell Wand: Tier " + tier.name(), ChatFormatting.GOLD)).glow();
+			for (Component c : SellWand.lore(d)) info.addLoreLine(c);
+			setSlot(WAND_INFO_SLOT, info);
+			var next = WandTier.next(d.level());
+			if (next.isPresent()) {
+				WandTier.Tier n = next.get();
+				setSlot(WAND_UPGRADE_SLOT, new GuiElementBuilder(Items.ANVIL).setName(plain("Upgrade to Tier " + n.name() + " - " + n.cost() + " coins", ChatFormatting.GREEN))
+					.addLoreLine(gray("Sell rate " + tier.ratePct() + "% -> " + n.ratePct() + "%"))
+					.addLoreLine(gray("Uses: " + (n.unlimited() ? "unlimited" : String.valueOf(n.uses())) + " (refilled)")));
+			} else {
+				setSlot(WAND_UPGRADE_SLOT, new GuiElementBuilder(Items.NETHER_STAR).setName(plain("Max tier reached", ChatFormatting.LIGHT_PURPLE)));
+			}
+			if (!tier.unlimited()) {
+				setSlot(WAND_RECHARGE_SLOT, new GuiElementBuilder(Items.GLOWSTONE_DUST)
+					.setName(plain("Recharge uses - " + tier.rechargeCost() + " coins", ChatFormatting.YELLOW))
+					.addLoreLine(gray("Uses: " + SellWand.usesText(d) + " -> " + tier.uses())));
+			}
+		}
+		GuiElementBuilder tiers = new GuiElementBuilder(Items.BOOK).setName(plain("Wand tiers", ChatFormatting.AQUA));
+		for (WandTier.Tier t : WandTier.TIERS) {
+			tiers.addLoreLine(gray("Tier " + t.name() + ": " + t.ratePct() + "% rate, "
+				+ (t.unlimited() ? "unlimited uses" : t.uses() + " uses") + ", " + t.cost() + " coins"));
+		}
+		setSlot(WAND_TIERS_SLOT, tiers);
+	}
+
+	private void wandClick(ShopService svc, int slot) {
+		String err;
+		if (slot == WAND_BUY_SLOT) err = SellWand.buy(svc, player);
+		else if (slot == WAND_UPGRADE_SLOT) err = SellWand.upgrade(svc, player);
+		else if (slot == WAND_RECHARGE_SLOT) err = SellWand.recharge(svc, player);
+		else return;
+		if (err != null) fail(err);
+		else ok();
+		refresh();
+	}
+
+	// ---- item detail page (controller friendly: no shift/right-click needed) ----
+	private static final int DETAIL_ITEM_SLOT = 13;
+	private static final int[] BUY_SLOTS = {29, 30, 31};
+	private static final int[] BUY_QTY = {1, 16, 64};
+	private static final int SELL_ONE_SLOT = 33;
+	private static final int SELL_STACK_SLOT = 34;
+	private static final int SELL_ALL_SLOT = 35;
+	private static final int BACK_SLOT = 49;
+
+	private int countOf(Item item) {
+		int n = 0;
+		for (int i = 0; i < 36; i++) {
+			ItemStack s = player.getInventory().getItem(i);
+			if (s.is(item) && ShopSell.isPlain(s)) n += s.getCount();
+		}
+		return n;
+	}
+
+	private void renderDetail(Economy eco, ShopConfig.Item it) {
+		Item item = resolve(it.id()).orElse(Items.BARRIER);
+		long buy = eco.buyPrice(it);
+		long sell = eco.sellPrice(it);
+		int have = countOf(item);
+		setSlot(DETAIL_ITEM_SLOT, new GuiElementBuilder(item)
+			.addLoreLine(gray("Buy: " + buy + " each"))
+			.addLoreLine(gray(it.sellable() ? "Sell: " + sell + " each" : "Not sellable"))
+			.addLoreLine(gray("You have " + have)));
+		int max = new ItemStack(item).getMaxStackSize();
+		if (it.maxStack() != null) max = Math.min(max, it.maxStack());
+		max = Math.max(1, max);
+		int prev = 0;
+		for (int i = 0; i < BUY_SLOTS.length; i++) {
+			int q = Math.min(BUY_QTY[i], max);
+			if (q <= prev) continue;
+			prev = q;
+			setSlot(BUY_SLOTS[i], new GuiElementBuilder(Items.STAINED_GLASS_PANE.lime()).setCount(q)
+				.setName(plain("Buy " + q + " - " + buy * q + " coins", ChatFormatting.GREEN)));
+		}
+		if (it.sellable()) {
+			setSlot(SELL_ONE_SLOT, new GuiElementBuilder(Items.STAINED_GLASS_PANE.orange())
+				.setName(plain("Sell 1 - " + sell + " coins", ChatFormatting.GOLD)));
+			int stackQty = Math.min(have, new ItemStack(item).getMaxStackSize());
+			setSlot(SELL_STACK_SLOT, new GuiElementBuilder(Items.STAINED_GLASS_PANE.orange()).setCount(Math.max(1, stackQty))
+				.setName(plain("Sell " + stackQty + " - " + sell * stackQty + " coins", ChatFormatting.GOLD)));
+			setSlot(SELL_ALL_SLOT, new GuiElementBuilder(Items.STAINED_GLASS_PANE.red())
+				.setName(plain("Sell all " + have + " - " + sell * have + " coins", ChatFormatting.RED)));
+		}
+		setSlot(BACK_SLOT, new GuiElementBuilder(Items.ARROW).setName(plain("Back", ChatFormatting.AQUA)));
+	}
+
+	private void detailClick(ShopService svc, int slot) {
+		if (slot == BACK_SLOT) {
+			detailItemId = null;
+			refresh();
+			return;
+		}
+		ShopConfig.Item it = svc.config().item(detailItemId);
+		if (it == null) {
+			detailItemId = null;
+			refresh();
+			return;
+		}
+		for (int i = 0; i < BUY_SLOTS.length; i++) {
+			if (slot == BUY_SLOTS[i]) {
+				buyQty(svc, it, BUY_QTY[i]);
+				return;
+			}
+		}
+		Item item = resolve(it.id()).orElse(null);
+		if (item == null || !it.sellable()) return;
+		int qty;
+		if (slot == SELL_ONE_SLOT) qty = 1;
+		else if (slot == SELL_STACK_SLOT) qty = new ItemStack(item).getMaxStackSize();
+		else if (slot == SELL_ALL_SLOT) qty = Integer.MAX_VALUE;
+		else return;
+		sellOf(svc, it, item, qty);
+	}
+
+	/** Sells up to qty of an item from the player's main inventory + hotbar. */
+	private void sellOf(ShopService svc, ShopConfig.Item it, Item item, int qty) {
+		Economy eco = svc.economy();
+		int left = qty;
+		int sold = 0;
+		String err = null;
+		for (int i = 0; i < 36 && left > 0; i++) {
+			ItemStack s = player.getInventory().getItem(i);
+			if (!s.is(item) || !ShopSell.isPlain(s)) continue;
+			Economy.Result r = eco.sell(id, it.id(), Math.min(left, s.getCount()));
+			if (!r.ok()) {
+				err = r.error();
+				break;
+			}
+			s.shrink(r.removed());
+			left -= r.removed();
+			sold += r.removed();
+		}
+		if (sold == 0) {
+			fail("tier locked".equals(err) ? "That tier is locked." : "You have none to sell.");
+			refresh();
+			return;
+		}
+		svc.save();
+		ok();
+		refresh();
 	}
 
 	private static ClickKind kind(ClickType type) {
@@ -258,14 +454,39 @@ public final class ShopGui extends SimpleGui {
 			refresh();
 			return;
 		}
+		if (index >= ShopRouter.ITEM_START && index < ShopRouter.ITEM_END) {
+			if (wandSelected) {
+				if (kind == ClickKind.LEFT) wandClick(svc, index);
+				return;
+			}
+			if (detailItemId != null) {
+				if (kind == ClickKind.LEFT) detailClick(svc, index);
+				return;
+			}
+		}
+		boolean inPages = !wandSelected && detailItemId == null;
 		Action act = ShopRouter.route(index, kind, t -> t < cfg.tiers().size() && eco.isUnlocked(id, cfg.tiers().get(t).id()),
-			bmShown, blackMarketSelected, page > 0, page < pages - 1);
+			bmShown, blackMarketSelected, inPages && page > 0, inPages && page < pages - 1);
 		switch (act.type()) {
 			case NONE -> { }
-			case CLOSE -> close();
+			case SELECT_WAND -> {
+				wandSelected = true;
+				blackMarketSelected = false;
+				detailItemId = null;
+				refresh();
+			}
+			case DETAIL -> {
+				List<ShopConfig.Item> all = tierItems(cfg, eco);
+				long abs = (long) page * ShopRouter.PAGE_SIZE + act.index();
+				if (act.index() < 0 || abs >= all.size()) return;
+				detailItemId = all.get((int) abs).id();
+				refresh();
+			}
 			case SELECT_TAB -> {
 				selectedTab = act.index();
 				blackMarketSelected = false;
+				wandSelected = false;
+				detailItemId = null;
 				page = 0;
 				refresh();
 			}
@@ -279,6 +500,8 @@ public final class ShopGui extends SimpleGui {
 			}
 			case SELECT_BLACK_MARKET -> {
 				blackMarketSelected = true;
+				wandSelected = false;
+				detailItemId = null;
 				refresh();
 			}
 			case BUY_OFFER -> buyOffer(svc, act.index());
@@ -288,6 +511,8 @@ public final class ShopGui extends SimpleGui {
 				if (r.ok()) {
 					selectedTab = act.index();
 					blackMarketSelected = false;
+					wandSelected = false;
+					detailItemId = null;
 					page = 0;
 					svc.save();
 					ok();
@@ -314,14 +539,18 @@ public final class ShopGui extends SimpleGui {
 		ShopConfig.Item it = all.get((int) abs);
 		Item item = resolve(it.id()).orElse(null);
 		if (item == null) return;
+		buyQty(svc, it, stack ? Integer.MAX_VALUE : 1);
+	}
 
+	/** Buys up to qty (capped at one stack and the item's maxStack) of a config item. */
+	private void buyQty(ShopService svc, ShopConfig.Item it, int wanted) {
+		Economy eco = svc.economy();
+		Item item = resolve(it.id()).orElse(null);
+		if (item == null) return;
 		int max = new ItemStack(item).getMaxStackSize();
-		int qty = 1;
-		if (stack) {
-			qty = max;
-			if (it.maxStack() != null) qty = Math.min(qty, it.maxStack());
-			qty = Math.max(1, qty);
-		}
+		int qty = Math.min(wanted, max);
+		if (it.maxStack() != null) qty = Math.min(qty, it.maxStack());
+		qty = Math.max(1, qty);
 		ItemStack probe = new ItemStack(item, 1);
 		int fits = 0;
 		for (ItemStack in : player.getInventory().getNonEquipmentItems()) {
@@ -396,7 +625,7 @@ public final class ShopGui extends SimpleGui {
 			if (in.isEmpty()) fits += max;
 			else if (ItemStack.isSameItemSameComponents(in, give)) fits += Math.max(0, max - in.getCount());
 		}
-		if (fits < 1) {
+		if (fits < give.getCount()) {
 			fail("Your inventory is full.");
 			return;
 		}

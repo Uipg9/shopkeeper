@@ -24,6 +24,7 @@ public class Shopkeeper implements ModInitializer {
 	@Override
 	public void onInitialize() {
 		ShopCommands.register();
+		SellWand.register();
 		ServerLifecycleEvents.SERVER_STARTED.register(ShopService::init);
 		ServerLifecycleEvents.SERVER_STOPPING.register(server -> ShopService.shutdown());
 		ServerTickEvents.END_SERVER_TICK.register(server -> {

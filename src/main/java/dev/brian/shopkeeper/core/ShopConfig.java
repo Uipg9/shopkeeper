@@ -8,11 +8,19 @@ import java.util.Map;
 public record ShopConfig(long startingBalance, double sellFraction, List<Tier> tiers, List<Item> items,
 		BlackMarketSettings blackMarket) {
 	public static final int MIN_BLACK_MARKET_SLOTS = 1;
-	public static final int MAX_BLACK_MARKET_SLOTS = 9;
+	public static final int MAX_BLACK_MARKET_SLOTS = 18;
 
-	/** Optional "blackMarket" block. Defaults: enabled, 6 slots. */
-	public record BlackMarketSettings(boolean enabled, int slots) {
+	/**
+	 * Optional "blackMarket" block. Defaults: enabled, 6 gear slots, and books / rare goods / mystery crate all on.
+	 * slots counts gear offers only; the extra kinds have fixed daily counts (see BlackMarket).
+	 */
+	public record BlackMarketSettings(boolean enabled, int slots, boolean books, boolean rare, boolean crate) {
 		public static final BlackMarketSettings DEFAULT = new BlackMarketSettings(true, 6);
+
+		/** Extra kinds default to on. */
+		public BlackMarketSettings(boolean enabled, int slots) {
+			this(enabled, slots, true, true, true);
+		}
 	}
 
 	public static final double MIN_SELL_FRACTION = 0.25;

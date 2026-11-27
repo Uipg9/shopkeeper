@@ -36,10 +36,10 @@ class ShopRouterTest {
 	}
 
 	@Test
-	void closeLeftOnly() {
+	void wandTabLeftOnly() {
 		for (ClickKind k : ClickKind.values()) {
 			Action a = route(8, k, ALL);
-			if (k == ClickKind.LEFT) assertEquals(Type.CLOSE, a.type());
+			if (k == ClickKind.LEFT) assertEquals(Type.SELECT_WAND, a.type());
 			else assertEquals(Action.NONE, a);
 		}
 	}
@@ -49,7 +49,8 @@ class ShopRouterTest {
 		for (int s = 9; s < 54; s++) {
 			assertEquals(new Action(Type.BUY_ONE, s - 9), route(s, ClickKind.LEFT, ALL));
 			assertEquals(new Action(Type.BUY_STACK, s - 9), route(s, ClickKind.SHIFT_LEFT, ALL));
-			for (ClickKind k : new ClickKind[] {ClickKind.RIGHT, ClickKind.SHIFT_RIGHT, ClickKind.OTHER}) {
+			assertEquals(new Action(Type.DETAIL, s - 9), route(s, ClickKind.RIGHT, ALL));
+			for (ClickKind k : new ClickKind[] {ClickKind.SHIFT_RIGHT, ClickKind.OTHER}) {
 				assertEquals(Action.NONE, route(s, k, ALL));
 			}
 		}

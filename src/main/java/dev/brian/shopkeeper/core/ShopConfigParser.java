@@ -175,15 +175,10 @@ public final class ShopConfigParser {
 			return null;
 		}
 		JsonObject o = e.getAsJsonObject();
-		boolean enabled = true;
-		JsonElement en = o.get("enabled");
-		if (en != null && !en.isJsonNull()) {
-			if (!en.isJsonPrimitive() || !en.getAsJsonPrimitive().isBoolean()) {
-				errors.add("blackMarket 'enabled' must be true or false");
-			} else {
-				enabled = en.getAsBoolean();
-			}
-		}
+		boolean enabled = blackMarketFlag(o, "enabled", errors);
+		boolean books = blackMarketFlag(o, "books", errors);
+		boolean rare = blackMarketFlag(o, "rare", errors);
+		boolean crate = blackMarketFlag(o, "crate", errors);
 		int slots = ShopConfig.BlackMarketSettings.DEFAULT.slots();
 		Long sl = longField(o, "slots", "blackMarket", errors, true, null);
 		if (sl != null) {
@@ -194,7 +189,18 @@ public final class ShopConfigParser {
 				slots = sl.intValue();
 			}
 		}
-		return new ShopConfig.BlackMarketSettings(enabled, slots);
+		return new ShopConfig.BlackMarketSettings(enabled, slots, books, rare, crate);
+	}
+
+	/** Optional boolean in the blackMarket block; absent/null means true. */
+	private static boolean blackMarketFlag(JsonObject o, String key, List<String> errors) {
+		JsonElement en = o.get(key);
+		if (en == null || en.isJsonNull()) return true;
+		if (!en.isJsonPrimitive() || !en.getAsJsonPrimitive().isBoolean()) {
+			errors.add("blackMarket '" + key + "' must be true or false");
+			return true;
+		}
+		return en.getAsBoolean();
 	}
 
 	private static JsonArray arrayField(JsonObject o, String key, List<String> errors) {

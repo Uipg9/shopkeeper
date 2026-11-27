@@ -9,18 +9,39 @@ A single-player `/shop` for **Minecraft 26.3** (Fabric). Earn coins by selling w
 | `/shop` | Open the shop |
 | `/shop balance` | Show your coins |
 | `/shop sell` | Sell the stack in your main hand |
-| `/shop sellall` | Sell every eligible stack in your inventory and hotbar (skips modified, unsellable and locked-tier stacks) and show one summary message |
+| `/shop sellall` | Same as `/sell inventory` |
+| `/shop wand` / `/sellwand` | Open the Sell Wand tab (`/sellwand buy`, `upgrade`, `recharge` also work as commands) |
 | `/sell` | Sell the stack in your main hand (same as `/shop sell`) |
-| `/sell all` | Sell everything eligible (same as `/shop sellall`) |
+| `/sell all` | Sell every stack of the item in your hand, e.g. all 460 cooked potatoes, and nothing else |
+| `/sell inventory` | Sell every eligible stack in your inventory and hotbar (skips modified, unsellable and locked-tier stacks) |
+| `/sell undo` | Buy back your last `/sell` sale for the same coins, within 30 seconds |
+| `/worth` | Show what the item in your hand sells for (each, stack, and all you carry) |
 | `/buy <item> [quantity]` | Buy without opening the menu, e.g. `/buy oak_log 64` or `/buy "iron ingot" 3` (tab-completes; quantity 1-2304; buys only what fits in your inventory) |
 | `/shop report` | Show today's earnings report |
 | `/shop reload` | Reload the config (operators only) |
 
 ## How it works
 
-- **Buying:** click an item to buy 1, shift-click to buy a stack.
+- **Buying:** click an item to buy 1, shift-click to buy a stack, or right-click it for a page with Buy 1/16/64 and Sell 1/Stack/All buttons (handy on a controller).
 - **Selling:** click items in your own inventory while the shop is open. Only unmodified items sell (no renamed, enchanted or damaged gear).
 - **Tiers:** the tabs along the top (Basics, Underground, Deep, Rare by default). Pay a tier's unlock price once and it stays unlocked permanently.
+
+## Sell Wand
+
+The top-right button of the shop (blaze rod) opens the Sell Wand tab. The wand is a vanilla blaze rod with a glint; right-click any chest, barrel, shulker box or hopper with it and everything the shop buys inside is sold. Everything else stays put.
+
+| Tier | Cost | Pays | Uses |
+|---|---|---|---|
+| I | 1,000 | 75% of the sell price | 50 |
+| II | 5,000 | 85% | 200 |
+| III | 20,000 | 95% | 1,000 |
+| IV | 60,000 | 100% | unlimited |
+
+Upgrading refills uses; recharging costs a quarter of the tier price. The Close button is gone: press Esc (or B on a controller).
+
+## Controller / keybinds
+
+Every shortcut is a rebindable key (unbound except Open Shop = B) and, with Controlify installed, a controller binding you can put on Controlify's radial menu: Open Shop, Sell Hand, Sell All of Held Item, Sell Inventory, Undo Last Sale, Open Sell Wand. See the Controls screen, category "Shopkeeper". Inside the shop, LB/RB on a controller (Controlify's GUI tab buttons) or PageUp/PageDown on a keyboard flip pages.
 
 ## Economy
 
@@ -39,7 +60,7 @@ When the Minecraft day rolls over (or when you log in) you get one chat line for
 
 ## Black Market
 
-A tab in the shop menu offers a few cheap, used vanilla gear pieces each day: partial durability and a couple of modest enchantments. Stock rotates every Minecraft day from the world seed, and each offer can be bought once per day. No new items are added to the game.
+A tab in the shop menu offers cheap used vanilla gear each day (partial durability, modest enchantments), plus enchanted books (Mending is a rare roll), rare loot (heart of the sea, discs, trial keys, totems, a damaged trident or even netherite gear) and a Mystery Bundle. One offer a day is a half-price LUCKY DEAL. No elytra. Stock rotates every Minecraft day from the world seed, and each offer can be bought once per day. No new items are added to the game.
 
 - Gear costs at most 70% of the new price.
 - You can't sell it back (the shop only buys unmodified items).

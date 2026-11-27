@@ -1,4 +1,9 @@
 {
 	"key.shopkeeper.open_shop": "Open Shop",
+	"key.shopkeeper.sell_hand": "Sell Hand",
+	"key.shopkeeper.sell_all": "Sell All of Held Item",
+	"key.shopkeeper.sell_inventory": "Sell Inventory",
+	"key.shopkeeper.sell_undo": "Undo Last Sale",
+	"key.shopkeeper.sell_wand": "Open Sell Wand",
 	"key.category.shopkeeper.shopkeeper": "Shopkeeper"
 }
